@@ -7,8 +7,7 @@ app = FastAPI(
     title="MyOffice API",
     version="1.0.0",
     description="Complete office management system with equipment and employee management",
-    # This prevents automatic redirect for trailing slashes
-    redirect_slashes=False
+    redirect_slashes=False  # Prevents automatic redirect for trailing slashes
 )
 
 # CORS middleware - MUST be added BEFORE routes
@@ -17,7 +16,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        # Add your production domain here
+        # Production frontend domain
+        "https://myoffice-black.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
