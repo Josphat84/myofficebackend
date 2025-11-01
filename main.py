@@ -1,7 +1,7 @@
 ﻿# backend/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import equipment, employees, reports, maintenance, inventory, overtime, standby, ppe, leaves
+from app.routers import equipment, employees, reports, maintenance, inventory, overtime, standby, ppe, leave
 
 app = FastAPI(
     title="MyOffice API",
