@@ -79,9 +79,9 @@ def init_sample_data():
             "supplier": "TechSupply Inc",
             "location": "Shelf A-12",
             "status": "in-stock",
-            "lastRestocked": (datetime.now().replace(day=datetime.now().day - 7)).isoformat(),
-            "createdAt": (datetime.now().replace(day=datetime.now().day - 30)).isoformat(),
-            "updatedAt": (datetime.now().replace(day=datetime.now().day - 7)).isoformat()
+            "lastRestocked": (datetime.now() - timedelta(days=7)).isoformat(),
+            "createdAt": (datetime.now() - timedelta(days=30)).isoformat(),
+            "updatedAt": (datetime.now() - timedelta(days=7)).isoformat()
         },
         {
             "id": "inv-002",
