@@ -2,339 +2,328 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/api/standby", tags=["standby"])
 
 # Pydantic models
-class StandbyRoster(BaseModel):
+class StandbySchedule(BaseModel):
     id: str
-    title: str
-    type: str
+    employeeId: str
+    employeeName: str
     department: str
-    primaryContact: str
-    secondaryContact: str
-    startDate: str
-    endDate: str
-    status: str
-    location: str
-    notes: str
-    responseTime: str
+    date: str
+    startTime: str
+    endTime: str
+    duration: float
+    reason: str
+    status: str  # scheduled, in-progress, completed, cancelled
     createdAt: str
     updatedAt: str
 
-class StandbyRosterCreate(BaseModel):
-    title: str
-    type: str
+class StandbyScheduleCreate(BaseModel):
+    employeeId: str
+    employeeName: str
     department: str
-    primaryContact: str
-    secondaryContact: str
-    startDate: str
-    endDate: str
-    location: str
-    notes: str
-    responseTime: str
+    date: str
+    startTime: str
+    endTime: str
+    reason: str
 
-class StandbyRosterUpdate(BaseModel):
-    title: Optional[str] = None
-    type: Optional[str] = None
+class StandbyScheduleUpdate(BaseModel):
+    employeeId: Optional[str] = None
+    employeeName: Optional[str] = None
     department: Optional[str] = None
-    primaryContact: Optional[str] = None
-    secondaryContact: Optional[str] = None
-    startDate: Optional[str] = None
-    endDate: Optional[str] = None
+    date: Optional[str] = None
+    startTime: Optional[str] = None
+    endTime: Optional[str] = None
+    reason: Optional[str] = None
     status: Optional[str] = None
-    location: Optional[str] = None
-    notes: Optional[str] = None
-    responseTime: Optional[str] = None
 
 # Mock database
 standby_db = {}
 
+def calculate_duration(start_time: str, end_time: str) -> float:
+    """Calculate duration in hours between two time strings"""
+    start = datetime.strptime(start_time, "%H:%M")
+    end = datetime.strptime(end_time, "%H:%M")
+    duration = (end - start).seconds / 3600
+    return round(duration, 2)
+
+# Initialize with sample data
 def init_sample_data():
     now = datetime.now()
-    sample_rosters = [
+    
+    sample_schedules = [
         {
-            "id": "sb-001",
-            "title": "Weekend Emergency Maintenance",
-            "type": "Emergency Response",
+            "id": "std-001",
+            "employeeId": "emp-001",
+            "employeeName": "John Smith",
             "department": "Maintenance",
-            "primaryContact": "emp-1",
-            "secondaryContact": "emp-2",
-            "startDate": (now.replace(day=now.day + 1)).isoformat(),
-            "endDate": (now.replace(day=now.day + 3)).isoformat(),
-            "status": "active",
-            "location": "Main Plant",
-            "notes": "Coverage for critical equipment failures and emergency repairs",
-            "responseTime": "30 minutes",
-            "createdAt": (now.replace(day=now.day - 2)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 1)).isoformat()
-        },
-        {
-            "id": "sb-002",
-            "title": "Night Shift Safety Watch",
-            "type": "Safety Watch",
-            "department": "Safety",
-            "primaryContact": "emp-3",
-            "secondaryContact": "emp-1",
-            "startDate": now.isoformat(),
-            "endDate": (now.replace(day=now.day + 7)).isoformat(),
-            "status": "active",
-            "location": "All Sites",
-            "notes": "24/7 safety monitoring and incident response",
-            "responseTime": "Immediate",
-            "createdAt": (now.replace(day=now.day - 5)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 1)).isoformat()
-        },
-        {
-            "id": "sb-003",
-            "title": "IT Infrastructure Support",
-            "type": "Technical Support",
-            "department": "IT",
-            "primaryContact": "emp-4",
-            "secondaryContact": "emp-5",
-            "startDate": (now.replace(day=now.day + 2)).isoformat(),
-            "endDate": (now.replace(day=now.day + 9)).isoformat(),
+            "date": (now + timedelta(days=1)).strftime("%Y-%m-%d"),
+            "startTime": "18:00",
+            "endTime": "06:00",
+            "duration": 12.0,
+            "reason": "Emergency equipment monitoring",
             "status": "scheduled",
-            "location": "Data Center",
-            "notes": "Server and network infrastructure emergency support",
-            "responseTime": "15 minutes",
-            "createdAt": (now.replace(day=now.day - 3)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 1)).isoformat()
+            "createdAt": (now - timedelta(days=2)).isoformat(),
+            "updatedAt": (now - timedelta(days=1)).isoformat()
         },
         {
-            "id": "sb-004",
-            "title": "Medical Emergency Coverage",
-            "type": "Medical Standby",
-            "department": "Medical",
-            "primaryContact": "emp-6",
-            "secondaryContact": "emp-3",
-            "startDate": (now.replace(day=now.day - 1)).isoformat(),
-            "endDate": (now.replace(day=now.day + 6)).isoformat(),
-            "status": "active",
-            "location": "Medical Center",
-            "notes": "Emergency medical response and first aid",
-            "responseTime": "5 minutes",
-            "createdAt": (now.replace(day=now.day - 7)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 1)).isoformat()
-        },
-        {
-            "id": "sb-005",
-            "title": "Operations Control Room",
-            "type": "Operations Coverage",
+            "id": "std-002",
+            "employeeId": "emp-002",
+            "employeeName": "Sarah Johnson",
             "department": "Operations",
-            "primaryContact": "emp-2",
-            "secondaryContact": "emp-1",
-            "startDate": (now.replace(day=now.day - 3)).isoformat(),
-            "endDate": (now.replace(day=now.day + 2)).isoformat(),
+            "date": (now + timedelta(days=2)).strftime("%Y-%m-%d"),
+            "startTime": "20:00",
+            "endTime": "08:00",
+            "duration": 12.0,
+            "reason": "Production line support",
+            "status": "scheduled",
+            "createdAt": (now - timedelta(days=3)).isoformat(),
+            "updatedAt": (now - timedelta(days=2)).isoformat()
+        },
+        {
+            "id": "std-003",
+            "employeeId": "emp-003",
+            "employeeName": "Mike Chen",
+            "department": "IT",
+            "date": now.strftime("%Y-%m-%d"),
+            "startTime": "22:00",
+            "endTime": "06:00",
+            "duration": 8.0,
+            "reason": "System maintenance window",
+            "status": "in-progress",
+            "createdAt": (now - timedelta(days=5)).isoformat(),
+            "updatedAt": (now - timedelta(hours=2)).isoformat()
+        },
+        {
+            "id": "std-004",
+            "employeeId": "emp-004",
+            "employeeName": "Lisa Rodriguez",
+            "department": "Quality Control",
+            "date": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
+            "startTime": "16:00",
+            "endTime": "00:00",
+            "duration": 8.0,
+            "reason": "Quality audit preparation",
             "status": "completed",
-            "location": "Control Room A",
-            "notes": "24/7 operations monitoring and coordination",
-            "responseTime": "Immediate",
-            "createdAt": (now.replace(day=now.day - 10)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 1)).isoformat()
+            "createdAt": (now - timedelta(days=7)).isoformat(),
+            "updatedAt": (now - timedelta(days=1)).isoformat()
+        },
+        {
+            "id": "std-005",
+            "employeeId": "emp-005",
+            "employeeName": "David Brown",
+            "department": "Security",
+            "date": (now + timedelta(days=3)).strftime("%Y-%m-%d"),
+            "startTime": "00:00",
+            "endTime": "08:00",
+            "duration": 8.0,
+            "reason": "Facility security monitoring",
+            "status": "scheduled",
+            "createdAt": (now - timedelta(days=1)).isoformat(),
+            "updatedAt": (now - timedelta(days=1)).isoformat()
         }
     ]
     
-    for roster in sample_rosters:
-        standby_db[roster["id"]] = roster
+    for schedule in sample_schedules:
+        standby_db[schedule["id"]] = schedule
 
 # Initialize sample data
 init_sample_data()
 
-@router.get("/rosters", response_model=List[StandbyRoster])
-async def get_standby_rosters(
-    status: Optional[str] = None,
+@router.get("/schedules", response_model=List[StandbySchedule])
+async def get_standby_schedules(
     department: Optional[str] = None,
-    type: Optional[str] = None,
-    search: Optional[str] = None
+    status: Optional[str] = None,
+    date: Optional[str] = None,
+    employee_id: Optional[str] = None
 ):
-    """Get all standby rosters with optional filtering"""
-    rosters = list(standby_db.values())
+    """Get all standby schedules with optional filtering"""
+    schedules = list(standby_db.values())
     
     # Apply filters
-    if status:
-        rosters = [roster for roster in rosters if roster["status"] == status]
     if department:
-        rosters = [roster for roster in rosters if roster["department"] == department]
-    if type:
-        rosters = [roster for roster in rosters if roster["type"] == type]
-    if search:
-        search_lower = search.lower()
-        rosters = [
-            roster for roster in rosters 
-            if search_lower in roster["title"].lower() 
-            or search_lower in roster["department"].lower()
-            or search_lower in roster["notes"].lower()
-        ]
+        schedules = [s for s in schedules if s["department"] == department]
+    if status:
+        schedules = [s for s in schedules if s["status"] == status]
+    if date:
+        schedules = [s for s in schedules if s["date"] == date]
+    if employee_id:
+        schedules = [s for s in schedules if s["employeeId"] == employee_id]
     
-    return rosters
+    return schedules
 
-@router.get("/rosters/{roster_id}", response_model=StandbyRoster)
-async def get_standby_roster(roster_id: str):
-    """Get a specific standby roster by ID"""
-    if roster_id not in standby_db:
-        raise HTTPException(status_code=404, detail="Standby roster not found")
-    return standby_db[roster_id]
+@router.get("/schedules/{schedule_id}", response_model=StandbySchedule)
+async def get_standby_schedule(schedule_id: str):
+    """Get a specific standby schedule by ID"""
+    if schedule_id not in standby_db:
+        raise HTTPException(status_code=404, detail="Standby schedule not found")
+    return standby_db[schedule_id]
 
-@router.post("/rosters", response_model=StandbyRoster)
-async def create_standby_roster(roster: StandbyRosterCreate):
-    """Create a new standby roster"""
-    roster_id = f"sb-{len(standby_db) + 1}"
+@router.post("/schedules", response_model=StandbySchedule)
+async def create_standby_schedule(schedule: StandbyScheduleCreate):
+    """Create a new standby schedule"""
+    schedule_id = f"std-{len(standby_db) + 1:03d}"
     now = datetime.now().isoformat()
     
-    # Set default status based on start date
-    start_date = datetime.fromisoformat(roster.startDate.replace('Z', '+00:00'))
-    current_time = datetime.now()
-    status = "active" if start_date <= current_time else "scheduled"
+    duration = calculate_duration(schedule.startTime, schedule.endTime)
     
-    new_roster = StandbyRoster(
-        id=roster_id,
-        **roster.dict(),
-        status=status,
+    new_schedule = StandbySchedule(
+        id=schedule_id,
+        employeeId=schedule.employeeId,
+        employeeName=schedule.employeeName,
+        department=schedule.department,
+        date=schedule.date,
+        startTime=schedule.startTime,
+        endTime=schedule.endTime,
+        duration=duration,
+        reason=schedule.reason,
+        status="scheduled",
         createdAt=now,
         updatedAt=now
     )
     
-    standby_db[roster_id] = new_roster.dict()
-    return new_roster
+    standby_db[schedule_id] = new_schedule.dict()
+    return new_schedule
 
-@router.put("/rosters/{roster_id}", response_model=StandbyRoster)
-async def update_standby_roster(roster_id: str, roster_update: StandbyRosterUpdate):
-    """Update an existing standby roster"""
-    if roster_id not in standby_db:
-        raise HTTPException(status_code=404, detail="Standby roster not found")
+@router.put("/schedules/{schedule_id}", response_model=StandbySchedule)
+async def update_standby_schedule(schedule_id: str, schedule_update: StandbyScheduleUpdate):
+    """Update an existing standby schedule"""
+    if schedule_id not in standby_db:
+        raise HTTPException(status_code=404, detail="Standby schedule not found")
     
-    existing_roster = standby_db[roster_id]
-    update_data = roster_update.dict(exclude_unset=True)
+    existing_schedule = standby_db[schedule_id]
+    update_data = schedule_update.dict(exclude_unset=True)
     
     # Update fields
     for field, value in update_data.items():
-        existing_roster[field] = value
+        if value is not None:
+            existing_schedule[field] = value
     
-    # Auto-update status based on dates if startDate or endDate changed
-    if 'startDate' in update_data or 'endDate' in update_data:
-        start_date = datetime.fromisoformat(existing_roster['startDate'].replace('Z', '+00:00'))
-        end_date = datetime.fromisoformat(existing_roster['endDate'].replace('Z', '+00:00'))
-        current_time = datetime.now()
-        
-        if current_time < start_date:
-            existing_roster['status'] = 'scheduled'
-        elif start_date <= current_time <= end_date:
-            existing_roster['status'] = 'active'
-        else:
-            existing_roster['status'] = 'completed'
+    # Recalculate duration if times changed
+    if 'startTime' in update_data or 'endTime' in update_data:
+        existing_schedule['duration'] = calculate_duration(
+            existing_schedule['startTime'],
+            existing_schedule['endTime']
+        )
     
-    existing_roster['updatedAt'] = datetime.now().isoformat()
-    standby_db[roster_id] = existing_roster
+    existing_schedule['updatedAt'] = datetime.now().isoformat()
+    standby_db[schedule_id] = existing_schedule
     
-    return existing_roster
+    return existing_schedule
 
-@router.delete("/rosters/{roster_id}")
-async def delete_standby_roster(roster_id: str):
-    """Delete a standby roster"""
-    if roster_id not in standby_db:
-        raise HTTPException(status_code=404, detail="Standby roster not found")
+@router.delete("/schedules/{schedule_id}")
+async def delete_standby_schedule(schedule_id: str):
+    """Delete a standby schedule"""
+    if schedule_id not in standby_db:
+        raise HTTPException(status_code=404, detail="Standby schedule not found")
     
-    del standby_db[roster_id]
-    return {"message": "Standby roster deleted successfully"}
+    del standby_db[schedule_id]
+    return {"message": "Standby schedule deleted successfully"}
 
-@router.post("/rosters/{roster_id}/activate")
-async def activate_roster(roster_id: str):
-    """Activate a standby roster"""
-    if roster_id not in standby_db:
-        raise HTTPException(status_code=404, detail="Standby roster not found")
+@router.post("/schedules/{schedule_id}/start")
+async def start_standby(schedule_id: str):
+    """Mark standby schedule as in-progress"""
+    if schedule_id not in standby_db:
+        raise HTTPException(status_code=404, detail="Standby schedule not found")
     
-    roster = standby_db[roster_id]
-    roster['status'] = 'active'
-    roster['updatedAt'] = datetime.now().isoformat()
+    schedule = standby_db[schedule_id]
+    schedule['status'] = 'in-progress'
+    schedule['updatedAt'] = datetime.now().isoformat()
     
-    standby_db[roster_id] = roster
-    return {"message": "Roster activated", "roster": roster}
+    standby_db[schedule_id] = schedule
+    return {"message": "Standby schedule started", "schedule": schedule}
 
-@router.post("/rosters/{roster_id}/complete")
-async def complete_roster(roster_id: str):
-    """Mark a standby roster as completed"""
-    if roster_id not in standby_db:
-        raise HTTPException(status_code=404, detail="Standby roster not found")
+@router.post("/schedules/{schedule_id}/complete")
+async def complete_standby(schedule_id: str):
+    """Mark standby schedule as completed"""
+    if schedule_id not in standby_db:
+        raise HTTPException(status_code=404, detail="Standby schedule not found")
     
-    roster = standby_db[roster_id]
-    roster['status'] = 'completed'
-    roster['updatedAt'] = datetime.now().isoformat()
+    schedule = standby_db[schedule_id]
+    schedule['status'] = 'completed'
+    schedule['updatedAt'] = datetime.now().isoformat()
     
-    standby_db[roster_id] = roster
-    return {"message": "Roster completed", "roster": roster}
+    standby_db[schedule_id] = schedule
+    return {"message": "Standby schedule completed", "schedule": schedule}
+
+@router.post("/schedules/{schedule_id}/cancel")
+async def cancel_standby(schedule_id: str):
+    """Cancel a standby schedule"""
+    if schedule_id not in standby_db:
+        raise HTTPException(status_code=404, detail="Standby schedule not found")
+    
+    schedule = standby_db[schedule_id]
+    schedule['status'] = 'cancelled'
+    schedule['updatedAt'] = datetime.now().isoformat()
+    
+    standby_db[schedule_id] = schedule
+    return {"message": "Standby schedule cancelled", "schedule": schedule}
+
+@router.get("/upcoming")
+async def get_upcoming_standby():
+    """Get upcoming standby schedules (next 7 days)"""
+    schedules = list(standby_db.values())
+    today = datetime.now().strftime("%Y-%m-%d")
+    next_week = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+    
+    upcoming = [
+        s for s in schedules 
+        if s['date'] >= today and s['date'] <= next_week and s['status'] in ['scheduled', 'in-progress']
+    ]
+    
+    return {
+        "count": len(upcoming),
+        "schedules": sorted(upcoming, key=lambda x: x['date'])
+    }
 
 @router.get("/stats")
 async def get_standby_stats():
     """Get standby statistics for dashboard"""
-    rosters = list(standby_db.values())
+    schedules = list(standby_db.values())
     
-    total = len(rosters)
-    active = len([r for r in rosters if r['status'] == 'active'])
-    scheduled = len([r for r in rosters if r['status'] == 'scheduled'])
-    completed = len([r for r in rosters if r['status'] == 'completed'])
+    total_schedules = len(schedules)
+    scheduled = len([s for s in schedules if s['status'] == 'scheduled'])
+    in_progress = len([s for s in schedules if s['status'] == 'in-progress'])
+    completed = len([s for s in schedules if s['status'] == 'completed'])
+    cancelled = len([s for s in schedules if s['status'] == 'cancelled'])
     
-    # Count by department
+    # Calculate total standby hours
+    total_hours = sum(s['duration'] for s in schedules if s['status'] in ['completed', 'in-progress'])
+    
+    # Calculate department distribution
     departments = {}
-    for roster in rosters:
-        dept = roster['department']
-        departments[dept] = departments.get(dept, 0) + 1
-    
-    # Count by type
-    types = {}
-    for roster in rosters:
-        roster_type = roster['type']
-        types[roster_type] = types.get(roster_type, 0) + 1
+    for schedule in schedules:
+        dept = schedule['department']
+        if dept not in departments:
+            departments[dept] = 0
+        departments[dept] += 1
     
     return {
-        "total": total,
-        "active": active,
+        "totalSchedules": total_schedules,
         "scheduled": scheduled,
+        "inProgress": in_progress,
         "completed": completed,
-        "byDepartment": departments,
-        "byType": types
+        "cancelled": cancelled,
+        "totalHours": round(total_hours, 2),
+        "departmentDistribution": departments
+    }
+
+@router.get("/employees/{employee_id}/schedules")
+async def get_employee_standby_schedules(employee_id: str):
+    """Get all standby schedules for a specific employee"""
+    schedules = [s for s in standby_db.values() if s['employeeId'] == employee_id]
+    return {
+        "employeeId": employee_id,
+        "employeeName": schedules[0]['employeeName'] if schedules else "Unknown",
+        "count": len(schedules),
+        "schedules": sorted(schedules, key=lambda x: x['date'], reverse=True)
     }
 
 @router.get("/departments")
 async def get_departments():
-    """Get all departments with standby coverage"""
-    departments = set(roster['department'] for roster in standby_db.values())
+    """Get all departments with standby schedules"""
+    departments = set(s['department'] for s in standby_db.values())
     return {"departments": sorted(list(departments))}
-
-@router.get("/types")
-async def get_roster_types():
-    """Get all roster types"""
-    types = set(roster['type'] for roster in standby_db.values())
-    return {"types": sorted(list(types))}
-
-@router.get("/active")
-async def get_active_rosters():
-    """Get all currently active standby rosters"""
-    now = datetime.now()
-    active_rosters = []
-    
-    for roster in standby_db.values():
-        start_date = datetime.fromisoformat(roster['startDate'].replace('Z', '+00:00'))
-        end_date = datetime.fromisoformat(roster['endDate'].replace('Z', '+00:00'))
-        
-        if start_date <= now <= end_date and roster['status'] == 'active':
-            active_rosters.append(roster)
-    
-    return {"activeRosters": active_rosters}
-
-@router.get("/upcoming")
-async def get_upcoming_rosters(days: int = 7):
-    """Get rosters starting within the next specified days"""
-    now = datetime.now()
-    future_date = now.replace(day=now.day + days)
-    
-    upcoming_rosters = []
-    
-    for roster in standby_db.values():
-        start_date = datetime.fromisoformat(roster['startDate'].replace('Z', '+00:00'))
-        
-        if now <= start_date <= future_date and roster['status'] == 'scheduled':
-            upcoming_rosters.append(roster)
-    
-    return {"upcomingRosters": upcoming_rosters}
