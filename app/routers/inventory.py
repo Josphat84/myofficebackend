@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
@@ -97,9 +97,9 @@ def init_sample_data():
             "supplier": "SafetyFirst Ltd",
             "location": "Bin C-08",
             "status": "low-stock",
-            "lastRestocked": (datetime.now().replace(day=datetime.now().day - 14)).isoformat(),
-            "createdAt": (datetime.now().replace(day=datetime.now().day - 45)).isoformat(),
-            "updatedAt": (datetime.now().replace(day=datetime.now().day - 14)).isoformat()
+            "lastRestocked": (datetime.now() - timedelta(days=14)).isoformat(),
+            "createdAt": (datetime.now() - timedelta(days=45)).isoformat(),
+            "updatedAt": (datetime.now() - timedelta(days=14)).isoformat()
         },
         {
             "id": "inv-003",
@@ -115,9 +115,9 @@ def init_sample_data():
             "supplier": "Industrial Parts Co",
             "location": "Drum Storage",
             "status": "in-stock",
-            "lastRestocked": (datetime.now().replace(day=datetime.now().day - 3)).isoformat(),
-            "createdAt": (datetime.now().replace(day=datetime.now().day - 60)).isoformat(),
-            "updatedAt": (datetime.now().replace(day=datetime.now().day - 3)).isoformat()
+            "lastRestocked": (datetime.now() - timedelta(days=3)).isoformat(),
+            "createdAt": (datetime.now() - timedelta(days=60)).isoformat(),
+            "updatedAt": (datetime.now() - timedelta(days=3)).isoformat()
         },
         {
             "id": "inv-004",
@@ -133,9 +133,9 @@ def init_sample_data():
             "supplier": "Global Tools",
             "location": "Tool Crib B",
             "status": "out-of-stock",
-            "lastRestocked": (datetime.now().replace(day=datetime.now().day - 30)).isoformat(),
-            "createdAt": (datetime.now().replace(day=datetime.now().day - 90)).isoformat(),
-            "updatedAt": (datetime.now().replace(day=datetime.now().day - 30)).isoformat()
+            "lastRestocked": (datetime.now() - timedelta(days=30)).isoformat(),
+            "createdAt": (datetime.now() - timedelta(days=90)).isoformat(),
+            "updatedAt": (datetime.now() - timedelta(days=30)).isoformat()
         },
         {
             "id": "inv-005",
@@ -151,9 +151,9 @@ def init_sample_data():
             "supplier": "Office Depot",
             "location": "Supply Closet",
             "status": "low-stock",
-            "lastRestocked": (datetime.now().replace(day=datetime.now().day - 21)).isoformat(),
-            "createdAt": (datetime.now().replace(day=datetime.now().day - 120)).isoformat(),
-            "updatedAt": (datetime.now().replace(day=datetime.now().day - 21)).isoformat()
+            "lastRestocked": (datetime.now() - timedelta(days=21)).isoformat(),
+            "createdAt": (datetime.now() - timedelta(days=120)).isoformat(),
+            "updatedAt": (datetime.now() - timedelta(days=21)).isoformat()
         }
     ]
     
@@ -201,16 +201,26 @@ async def get_inventory_item(item_id: str):
 @router.post("/items", response_model=InventoryItem)
 async def create_inventory_item(item: InventoryItemCreate):
     """Create a new inventory item"""
-    item_id = f"inv-{len(inventory_db) + 1}"
+    item_id = f"inv-{len(inventory_db) + 1:03d}"
     now = datetime.now().isoformat()
     
     status = calculate_status(item.currentStock, item.minStock)
     
     new_item = InventoryItem(
         id=item_id,
-        **item.dict(),
+        name=item.name,
+        sku=item.sku,
+        category=item.category,
+        description=item.description,
+        currentStock=item.currentStock,
+        minStock=item.minStock,
+        maxStock=item.maxStock,
+        unit=item.unit,
+        cost=item.cost,
+        supplier=item.supplier,
+        location=item.location,
         status=status,
-        lastRestocked=now if item.currentStock > 0 else None,
+        lastRestocked=now if item.currentStock > 0 else (datetime.now() - timedelta(days=30)).isoformat(),
         createdAt=now,
         updatedAt=now
     )
@@ -229,7 +239,8 @@ async def update_inventory_item(item_id: str, item_update: InventoryItemUpdate):
     
     # Update fields
     for field, value in update_data.items():
-        existing_item[field] = value
+        if value is not None:
+            existing_item[field] = value
     
     # Recalculate status if stock changed
     if 'currentStock' in update_data:
@@ -237,7 +248,7 @@ async def update_inventory_item(item_id: str, item_update: InventoryItemUpdate):
             existing_item['currentStock'], 
             existing_item['minStock']
         )
-        if update_data['currentStock'] > existing_item['currentStock']:
+        if update_data['currentStock'] > existing_item.get('previous_stock', existing_item['currentStock']):
             existing_item['lastRestocked'] = datetime.now().isoformat()
     
     existing_item['updatedAt'] = datetime.now().isoformat()
@@ -286,11 +297,20 @@ async def get_inventory_stats():
     out_of_stock = len([item for item in items if item['status'] == 'out-of-stock'])
     total_value = sum(item['currentStock'] * item['cost'] for item in items)
     
+    # Calculate category distribution
+    categories = {}
+    for item in items:
+        category = item['category']
+        if category not in categories:
+            categories[category] = 0
+        categories[category] += 1
+    
     return {
         "totalItems": total_items,
         "lowStock": low_stock,
         "outOfStock": out_of_stock,
-        "totalValue": round(total_value, 2)
+        "totalValue": round(total_value, 2),
+        "categoryDistribution": categories
     }
 
 @router.get("/categories")
@@ -304,3 +324,13 @@ async def get_suppliers():
     """Get all suppliers"""
     suppliers = set(item['supplier'] for item in inventory_db.values())
     return {"suppliers": sorted(list(suppliers))}
+
+@router.get("/low-stock")
+async def get_low_stock_items():
+    """Get all low stock and out-of-stock items"""
+    items = list(inventory_db.values())
+    low_stock_items = [item for item in items if item['status'] in ['low-stock', 'out-of-stock']]
+    return {
+        "count": len(low_stock_items),
+        "items": low_stock_items
+    }
