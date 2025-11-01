@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
 router = APIRouter()
@@ -114,8 +114,8 @@ def initialize_sample_data():
                 "assigned_to_name": "Sarah Chen",
                 "reported_by": "emp-1",
                 "reported_by_name": "Mike Johnson",
-                "scheduled_date": (now.replace(day=now.day-2)).isoformat(),
-                "completed_date": (now.replace(day=now.day-1)).isoformat(),
+                "scheduled_date": (now - timedelta(days=2)).isoformat(),
+                "completed_date": (now - timedelta(days=1)).isoformat(),
                 "estimated_hours": 4.0,
                 "actual_hours": 3.5,
                 "cost": 0.0,
@@ -125,8 +125,8 @@ def initialize_sample_data():
                     {"task": "Test machine operation", "completed": True},
                     {"task": "Update maintenance log", "completed": True}
                 ],
-                "created_at": (now.replace(day=now.day-5)).isoformat(),
-                "updated_at": (now.replace(day=now.day-1)).isoformat()
+                "created_at": (now - timedelta(days=5)).isoformat(),
+                "updated_at": (now - timedelta(days=1)).isoformat()
             },
             {
                 "id": "maint-002",
@@ -154,7 +154,7 @@ def initialize_sample_data():
                     {"task": "Replace hydraulic seal", "completed": False},
                     {"task": "Test forklift operation", "completed": False}
                 ],
-                "created_at": (now.replace(day=now.day-1)).isoformat(),
+                "created_at": (now - timedelta(days=1)).isoformat(),
                 "updated_at": now.isoformat()
             },
             {
@@ -184,6 +184,35 @@ def initialize_sample_data():
                 ],
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat()
+            },
+            {
+                "id": "maint-004",
+                "title": "Preventive Maintenance - Production Line",
+                "equipment_id": "eq-004",
+                "equipment_name": "Production Line B",
+                "description": "Monthly preventive maintenance for production line B",
+                "priority": "medium",
+                "category": "preventive",
+                "location": "Production Floor B",
+                "status": "scheduled",
+                "assigned_to": "emp-2",
+                "assigned_to_name": "Sarah Chen",
+                "reported_by": "emp-1",
+                "reported_by_name": "Mike Johnson",
+                "scheduled_date": (now + timedelta(days=3)).isoformat(),
+                "completed_date": None,
+                "estimated_hours": 8.0,
+                "actual_hours": None,
+                "cost": None,
+                "notes": "Routine maintenance including belt checks, lubrication, and calibration.",
+                "checklist": [
+                    {"task": "Check conveyor belts", "completed": False},
+                    {"task": "Lubricate moving parts", "completed": False},
+                    {"task": "Calibration check", "completed": False},
+                    {"task": "Safety system test", "completed": False}
+                ],
+                "created_at": (now - timedelta(days=2)).isoformat(),
+                "updated_at": (now - timedelta(days=1)).isoformat()
             }
         ]
         
@@ -341,25 +370,33 @@ async def get_maintenance_stats():
     completed_orders = len([wo for wo in work_orders_db.values() if wo["status"] == "completed"])
     in_progress_orders = len([wo for wo in work_orders_db.values() if wo["status"] == "in-progress"])
     open_orders = len([wo for wo in work_orders_db.values() if wo["status"] == "open"])
+    scheduled_orders = len([wo for wo in work_orders_db.values() if wo["status"] == "scheduled"])
     critical_orders = len([wo for wo in work_orders_db.values() if wo["priority"] == "critical"])
     
     # Calculate overdue orders
     now = datetime.now()
     overdue_orders = len([
         wo for wo in work_orders_db.values() 
-        if wo["status"] in ["open", "in-progress"] and 
+        if wo["status"] in ["open", "in-progress", "scheduled"] and 
         wo["scheduled_date"] and 
         datetime.fromisoformat(wo["scheduled_date"]) < now
     ])
     
+    # Calculate total costs and hours
+    total_cost = sum(wo["cost"] for wo in work_orders_db.values() if wo["cost"] is not None)
+    total_actual_hours = sum(wo["actual_hours"] for wo in work_orders_db.values() if wo["actual_hours"] is not None)
+    
     return {
         "total": total_orders,
         "open": open_orders,
+        "scheduled": scheduled_orders,
         "in_progress": in_progress_orders,
         "completed": completed_orders,
         "critical": critical_orders,
         "overdue": overdue_orders,
-        "completion_rate": (completed_orders / total_orders * 100) if total_orders > 0 else 0
+        "total_cost": round(total_cost, 2),
+        "total_hours": round(total_actual_hours, 2),
+        "completion_rate": round((completed_orders / total_orders * 100), 1) if total_orders > 0 else 0
     }
 
 @router.get("/categories/list")
@@ -388,3 +425,20 @@ async def get_equipment_list():
         {"id": "eq-005", "name": "Safety Shower", "category": "safety", "location": "Lab Area"}
     ]
     return equipment_list
+
+@router.get("/upcoming/maintenance")
+async def get_upcoming_maintenance(days: int = 7):
+    """Get upcoming maintenance within the next specified days"""
+    now = datetime.now()
+    future_date = now + timedelta(days=days)
+    
+    upcoming_maintenance = [
+        wo for wo in work_orders_db.values()
+        if wo["scheduled_date"] and 
+        now <= datetime.fromisoformat(wo["scheduled_date"]) <= future_date
+    ]
+    
+    return {
+        "count": len(upcoming_maintenance),
+        "upcoming_maintenance": sorted(upcoming_maintenance, key=lambda x: x["scheduled_date"])
+    }
