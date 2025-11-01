@@ -171,14 +171,14 @@ def init_sample_data():
             "employeeName": "Mike Johnson",
             "ppeItem": "hard_hat",
             "size": "L",
-            "issueDate": (now.replace(day=now.day - 30)).isoformat(),
-            "expiryDate": (now.replace(day=now.day + 335)).isoformat(),  # 1 year from issue
+            "issueDate": (now - timedelta(days=30)).isoformat(),
+            "expiryDate": (now + timedelta(days=335)).isoformat(),  # 1 year from issue
             "status": "assigned",
             "condition": "good",
-            "lastInspection": (now.replace(day=now.day - 7)).isoformat(),
+            "lastInspection": (now - timedelta(days=7)).isoformat(),
             "notes": "Yellow hard hat with chin strap",
-            "createdAt": (now.replace(day=now.day - 30)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 7)).isoformat()
+            "createdAt": (now - timedelta(days=30)).isoformat(),
+            "updatedAt": (now - timedelta(days=7)).isoformat()
         },
         {
             "id": "ppe-002",
@@ -186,14 +186,14 @@ def init_sample_data():
             "employeeName": "Mike Johnson",
             "ppeItem": "safety_boots",
             "size": "10",
-            "issueDate": (now.replace(day=now.day - 60)).isoformat(),
-            "expiryDate": (now.replace(day=now.day + 305)).isoformat(),  # 1 year from issue
+            "issueDate": (now - timedelta(days=60)).isoformat(),
+            "expiryDate": (now + timedelta(days=305)).isoformat(),  # 1 year from issue
             "status": "assigned",
             "condition": "fair",
-            "lastInspection": (now.replace(day=now.day - 14)).isoformat(),
+            "lastInspection": (now - timedelta(days=14)).isoformat(),
             "notes": "Steel-toe boots, needs replacement soon",
-            "createdAt": (now.replace(day=now.day - 60)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 14)).isoformat()
+            "createdAt": (now - timedelta(days=60)).isoformat(),
+            "updatedAt": (now - timedelta(days=14)).isoformat()
         },
         {
             "id": "ppe-003",
@@ -201,14 +201,14 @@ def init_sample_data():
             "employeeName": "Sarah Chen",
             "ppeItem": "hard_hat",
             "size": "M",
-            "issueDate": (now.replace(day=now.day - 15)).isoformat(),
-            "expiryDate": (now.replace(day=now.day + 350)).isoformat(),
+            "issueDate": (now - timedelta(days=15)).isoformat(),
+            "expiryDate": (now + timedelta(days=350)).isoformat(),
             "status": "assigned",
             "condition": "excellent",
-            "lastInspection": (now.replace(day=now.day - 15)).isoformat(),
+            "lastInspection": (now - timedelta(days=15)).isoformat(),
             "notes": "White hard hat, new issue",
-            "createdAt": (now.replace(day=now.day - 15)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 15)).isoformat()
+            "createdAt": (now - timedelta(days=15)).isoformat(),
+            "updatedAt": (now - timedelta(days=15)).isoformat()
         },
         {
             "id": "ppe-004",
@@ -216,14 +216,14 @@ def init_sample_data():
             "employeeName": "Sarah Chen",
             "ppeItem": "high_vis_vest",
             "size": "M",
-            "issueDate": (now.replace(day=now.day - 15)).isoformat(),
-            "expiryDate": (now.replace(day=now.day + 180)).isoformat(),  # 6 months
+            "issueDate": (now - timedelta(days=15)).isoformat(),
+            "expiryDate": (now + timedelta(days=180)).isoformat(),  # 6 months
             "status": "assigned",
             "condition": "good",
-            "lastInspection": (now.replace(day=now.day - 15)).isoformat(),
+            "lastInspection": (now - timedelta(days=15)).isoformat(),
             "notes": "Orange reflective vest",
-            "createdAt": (now.replace(day=now.day - 15)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 15)).isoformat()
+            "createdAt": (now - timedelta(days=15)).isoformat(),
+            "updatedAt": (now - timedelta(days=15)).isoformat()
         },
         {
             "id": "ppe-005",
@@ -231,14 +231,14 @@ def init_sample_data():
             "employeeName": "David Rodriguez",
             "ppeItem": "respirator",
             "size": "M",
-            "issueDate": (now.replace(day=now.day - 90)).isoformat(),
-            "expiryDate": (now.replace(day=now.day - 10)).isoformat(),  # Expired
+            "issueDate": (now - timedelta(days=90)).isoformat(),
+            "expiryDate": (now - timedelta(days=10)).isoformat(),  # Expired
             "status": "expired",
             "condition": "poor",
-            "lastInspection": (now.replace(day=now.day - 30)).isoformat(),
+            "lastInspection": (now - timedelta(days=30)).isoformat(),
             "notes": "N95 respirator - needs replacement",
-            "createdAt": (now.replace(day=now.day - 90)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 10)).isoformat()
+            "createdAt": (now - timedelta(days=90)).isoformat(),
+            "updatedAt": (now - timedelta(days=10)).isoformat()
         },
         {
             "id": "ppe-006",
@@ -246,14 +246,14 @@ def init_sample_data():
             "employeeName": "Emily Watson",
             "ppeItem": "fall_protection",
             "size": "L",
-            "issueDate": (now.replace(day=now.day - 45)).isoformat(),
-            "expiryDate": (now.replace(day=now.day + 320)).isoformat(),
+            "issueDate": (now - timedelta(days=45)).isoformat(),
+            "expiryDate": (now + timedelta(days=320)).isoformat(),
             "status": "assigned",
             "condition": "good",
-            "lastInspection": (now.replace(day=now.day - 45)).isoformat(),
+            "lastInspection": (now - timedelta(days=45)).isoformat(),
             "notes": "Full body harness",
-            "createdAt": (now.replace(day=now.day - 45)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 45)).isoformat()
+            "createdAt": (now - timedelta(days=45)).isoformat(),
+            "updatedAt": (now - timedelta(days=45)).isoformat()
         }
     ]
     
@@ -265,35 +265,35 @@ def init_sample_data():
         {
             "id": "insp-001",
             "ppeIssueId": "ppe-001",
-            "inspectionDate": (now.replace(day=now.day - 7)).isoformat(),
+            "inspectionDate": (now - timedelta(days=7)).isoformat(),
             "inspector": "safety-officer-1",
             "condition": "good",
             "passed": True,
             "notes": "No visible damage, chin strap intact",
-            "nextInspection": (now.replace(day=now.day + 23)).isoformat(),  # Monthly inspection
-            "createdAt": (now.replace(day=now.day - 7)).isoformat()
+            "nextInspection": (now + timedelta(days=23)).isoformat(),  # Monthly inspection
+            "createdAt": (now - timedelta(days=7)).isoformat()
         },
         {
             "id": "insp-002",
             "ppeIssueId": "ppe-002",
-            "inspectionDate": (now.replace(day=now.day - 14)).isoformat(),
+            "inspectionDate": (now - timedelta(days=14)).isoformat(),
             "inspector": "safety-officer-1",
             "condition": "fair",
             "passed": True,
             "notes": "Minor wear on soles, monitor for replacement",
-            "nextInspection": (now.replace(day=now.day + 16)).isoformat(),
-            "createdAt": (now.replace(day=now.day - 14)).isoformat()
+            "nextInspection": (now + timedelta(days=16)).isoformat(),
+            "createdAt": (now - timedelta(days=14)).isoformat()
         },
         {
             "id": "insp-003",
             "ppeIssueId": "ppe-005",
-            "inspectionDate": (now.replace(day=now.day - 30)).isoformat(),
+            "inspectionDate": (now - timedelta(days=30)).isoformat(),
             "inspector": "safety-officer-2",
             "condition": "poor",
             "passed": False,
             "notes": "Straps weakened, replace immediately",
-            "nextInspection": (now.replace(day=now.day - 30)).isoformat(),
-            "createdAt": (now.replace(day=now.day - 30)).isoformat()
+            "nextInspection": (now - timedelta(days=30)).isoformat(),
+            "createdAt": (now - timedelta(days=30)).isoformat()
         }
     ]
     
@@ -323,9 +323,9 @@ async def get_ppe_issues(
     if expired is not None:
         now = datetime.now()
         if expired:
-            issues = [issue for issue in issues if datetime.fromisoformat(issue["expiryDate"].replace('Z', '+00:00')) < now]
+            issues = [issue for issue in issues if datetime.fromisoformat(issue["expiryDate"]) < now]
         else:
-            issues = [issue for issue in issues if datetime.fromisoformat(issue["expiryDate"].replace('Z', '+00:00')) >= now]
+            issues = [issue for issue in issues if datetime.fromisoformat(issue["expiryDate"]) >= now]
     
     return issues
 
@@ -351,17 +351,23 @@ async def create_ppe_issue(issue: PPEIssueCreate):
     }
     employee_name = employee_mapping.get(issue.employeeId, "Unknown Employee")
     
-    issue_id = f"ppe-{len(ppe_issues_db) + 1}"
+    issue_id = f"ppe-{len(ppe_issues_db) + 1:03d}"
     now = datetime.now().isoformat()
     
     new_issue = PPEIssue(
         id=issue_id,
+        employeeId=issue.employeeId,
         employeeName=employee_name,
+        ppeItem=issue.ppeItem,
+        size=issue.size,
+        issueDate=issue.issueDate,
+        expiryDate=issue.expiryDate,
         status=PPEStatus.ASSIGNED,
+        condition=issue.condition,
         lastInspection=now,
+        notes=issue.notes,
         createdAt=now,
-        updatedAt=now,
-        **issue.dict()
+        updatedAt=now
     )
     
     ppe_issues_db[issue_id] = new_issue.dict()
@@ -370,6 +376,10 @@ async def create_ppe_issue(issue: PPEIssueCreate):
     if issue.ppeItem in ppe_inventory_db:
         ppe_inventory_db[issue.ppeItem]["assigned"] += 1
         ppe_inventory_db[issue.ppeItem]["available"] -= 1
+        # Update low stock status
+        ppe_inventory_db[issue.ppeItem]["lowStock"] = (
+            ppe_inventory_db[issue.ppeItem]["available"] <= ppe_inventory_db[issue.ppeItem]["reorderLevel"]
+        )
     
     return new_issue
 
@@ -384,7 +394,8 @@ async def update_ppe_issue(issue_id: str, issue_update: PPEIssueUpdate):
     
     # Update fields
     for field, value in update_data.items():
-        existing_issue[field] = value
+        if value is not None:
+            existing_issue[field] = value
     
     existing_issue['updatedAt'] = datetime.now().isoformat()
     ppe_issues_db[issue_id] = existing_issue
@@ -402,6 +413,10 @@ async def delete_ppe_issue(issue_id: str):
     if issue["ppeItem"] in ppe_inventory_db and issue["status"] == "assigned":
         ppe_inventory_db[issue["ppeItem"]]["assigned"] -= 1
         ppe_inventory_db[issue["ppeItem"]]["available"] += 1
+        # Update low stock status
+        ppe_inventory_db[issue["ppeItem"]]["lowStock"] = (
+            ppe_inventory_db[issue["ppeItem"]]["available"] <= ppe_inventory_db[issue["ppeItem"]]["reorderLevel"]
+        )
     
     del ppe_issues_db[issue_id]
     return {"message": "PPE issue deleted successfully"}
@@ -415,13 +430,18 @@ async def return_ppe_issue(issue_id: str, condition: str, notes: Optional[str] =
     issue = ppe_issues_db[issue_id]
     issue['status'] = PPEStatus.RETURNED
     issue['condition'] = condition
-    issue['notes'] = notes
+    if notes:
+        issue['notes'] = notes
     issue['updatedAt'] = datetime.now().isoformat()
     
     # Update inventory
     if issue["ppeItem"] in ppe_inventory_db:
         ppe_inventory_db[issue["ppeItem"]]["assigned"] -= 1
         ppe_inventory_db[issue["ppeItem"]]["available"] += 1
+        # Update low stock status
+        ppe_inventory_db[issue["ppeItem"]]["lowStock"] = (
+            ppe_inventory_db[issue["ppeItem"]]["available"] <= ppe_inventory_db[issue["ppeItem"]]["reorderLevel"]
+        )
     
     ppe_issues_db[issue_id] = issue
     return {"message": "PPE item returned", "issue": issue}
@@ -447,7 +467,7 @@ async def inspect_ppe_issue(
     issue['updatedAt'] = datetime.now().isoformat()
     
     # Create inspection record
-    inspection_id = f"insp-{len(ppe_inspections_db) + 1}"
+    inspection_id = f"insp-{len(ppe_inspections_db) + 1:03d}"
     next_inspection = (datetime.now() + timedelta(days=30)).isoformat()  # Monthly inspections
     
     inspection = PPEInspection(
@@ -496,19 +516,24 @@ async def get_ppe_inspections(issue_id: str):
 async def get_ppe_stats():
     """Get PPE statistics for dashboard"""
     issues = list(ppe_issues_db.values())
+    now = datetime.now()
     
     total_issues = len(issues)
     assigned_issues = len([issue for issue in issues if issue['status'] == 'assigned'])
-    expired_issues = len([issue for issue in issues if 
-                         datetime.fromisoformat(issue['expiryDate'].replace('Z', '+00:00')) < datetime.now()])
-    due_for_inspection = len([issue for issue in issues if 
-                             issue['lastInspection'] and 
-                             (datetime.now() - datetime.fromisoformat(issue['lastInspection'].replace('Z', '+00:00'))).days > 30])
+    expired_issues = len([issue for issue in issues if datetime.fromisoformat(issue['expiryDate']) < now])
+    
+    # Due for inspection (last inspection > 30 days ago)
+    due_for_inspection = 0
+    for issue in issues:
+        if issue['lastInspection']:
+            last_inspection = datetime.fromisoformat(issue['lastInspection'])
+            if (now - last_inspection).days > 30 and issue['status'] == 'assigned':
+                due_for_inspection += 1
     
     # Compliance rate (items not expired and in good condition)
     compliant_issues = len([issue for issue in issues if 
                           issue['status'] == 'assigned' and
-                          datetime.fromisoformat(issue['expiryDate'].replace('Z', '+00:00')) >= datetime.now() and
+                          datetime.fromisoformat(issue['expiryDate']) >= now and
                           issue['condition'] in ['excellent', 'good']])
     
     compliance_rate = (compliant_issues / assigned_issues * 100) if assigned_issues > 0 else 0
@@ -534,9 +559,12 @@ async def get_expiring_ppe(days: int = 30):
     expiring_issues = []
     
     for issue in ppe_issues_db.values():
-        expiry_date = datetime.fromisoformat(issue['expiryDate'].replace('Z', '+00:00'))
+        if issue['status'] != 'assigned':
+            continue
+            
+        expiry_date = datetime.fromisoformat(issue['expiryDate'])
         
-        if now <= expiry_date <= future_date and issue['status'] == 'assigned':
+        if now <= expiry_date <= future_date:
             days_until_expiry = (expiry_date - now).days
             expiring_issues.append({
                 **issue,
@@ -546,7 +574,10 @@ async def get_expiring_ppe(days: int = 30):
     # Sort by expiry date
     expiring_issues.sort(key=lambda x: x['expiryDate'])
     
-    return {"expiringItems": expiring_issues}
+    return {
+        "count": len(expiring_issues),
+        "expiringItems": expiring_issues
+    }
 
 @router.get("/employees/{employee_id}/ppe")
 async def get_employee_ppe(employee_id: str):
@@ -556,4 +587,19 @@ async def get_employee_ppe(employee_id: str):
         if issue["employeeId"] == employee_id and issue["status"] == "assigned"
     ]
     
-    return {"employeePPE": employee_issues}
+    return {
+        "employeeId": employee_id,
+        "employeeName": employee_issues[0]["employeeName"] if employee_issues else "Unknown",
+        "count": len(employee_issues),
+        "ppeItems": employee_issues
+    }
+
+@router.get("/items")
+async def get_ppe_items():
+    """Get all available PPE item types"""
+    return {"ppeItems": [item.value for item in PPEItem]}
+
+@router.get("/conditions")
+async def get_ppe_conditions():
+    """Get available PPE condition types"""
+    return {"conditions": ["excellent", "good", "fair", "poor", "damaged"]}
