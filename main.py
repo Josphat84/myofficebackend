@@ -32,7 +32,7 @@ app.include_router(inventory.router, prefix="/api/inventory", tags=["Inventory"]
 app.include_router(overtime.router, prefix="/api/overtime", tags=["Overtime"])
 app.include_router(standby.router, prefix="/api/standby", tags=["Standby"])
 app.include_router(ppe.router, prefix="/api/ppe", tags=["PPE"])
-app.include_router(leaves.router, prefix="/api/leave", tags=["Leaves"])
+app.include_router(leaves.router, prefix="/api/leave", tags=["Leave"])
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -48,7 +48,7 @@ async def root():
             "overtime": "/api/overtime",
             "standby": "/api/standby",
             "ppe": "/api/ppe",
-            "leaves": "/api/leaves",
+            "leave": "/api/leave",
             "health": "/api/health",
             "docs": "/docs"
         }
@@ -68,7 +68,7 @@ async def health_check():
             "overtime": "operational",
             "standby": "operational",
             "ppe": "operational",
-            "leaves": "operational"
+            "leave": "operational"
         }
     }
 
