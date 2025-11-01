@@ -32,7 +32,7 @@ app.include_router(inventory.router, prefix="/api/inventory", tags=["Inventory"]
 app.include_router(overtime.router, prefix="/api/overtime", tags=["Overtime"])
 app.include_router(standby.router, prefix="/api/standby", tags=["Standby"])
 app.include_router(ppe.router, prefix="/api/ppe", tags=["PPE"])
-app.include_router(leaves.router, prefix="/api/leaves", tags=["Leaves"])
+app.include_router(leaves.router, prefix="/api/leave", tags=["Leaves"])
 
 @app.get("/", tags=["Root"])
 async def root():
