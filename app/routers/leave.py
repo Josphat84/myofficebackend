@@ -73,8 +73,8 @@ leave_balances_db = {}
 
 def calculate_leave_days(start_date: str, end_date: str) -> int:
     """Calculate business days between two dates (excluding weekends)"""
-    start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-    end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+    start = datetime.fromisoformat(start_date)
+    end = datetime.fromisoformat(end_date)
     
     business_days = 0
     current = start
@@ -145,60 +145,60 @@ def init_sample_data():
             "employeeId": "emp-1",
             "employeeName": "Mike Johnson",
             "leaveType": "vacation",
-            "startDate": (now.replace(day=now.day + 10)).isoformat(),
-            "endDate": (now.replace(day=now.day + 14)).isoformat(),
+            "startDate": (now + timedelta(days=10)).isoformat(),
+            "endDate": (now + timedelta(days=14)).isoformat(),
             "totalDays": 5,
             "reason": "Family vacation",
             "status": "approved",
             "approvedBy": "manager-1",
-            "approvedAt": (now.replace(day=now.day - 2)).isoformat(),
-            "createdAt": (now.replace(day=now.day - 5)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 2)).isoformat()
+            "approvedAt": (now - timedelta(days=2)).isoformat(),
+            "createdAt": (now - timedelta(days=5)).isoformat(),
+            "updatedAt": (now - timedelta(days=2)).isoformat()
         },
         {
             "id": "leave-002",
             "employeeId": "emp-2",
             "employeeName": "Sarah Chen",
             "leaveType": "sick",
-            "startDate": (now.replace(day=now.day - 1)).isoformat(),
-            "endDate": (now.replace(day=now.day + 2)).isoformat(),
+            "startDate": (now - timedelta(days=1)).isoformat(),
+            "endDate": (now + timedelta(days=2)).isoformat(),
             "totalDays": 3,
             "reason": "Flu recovery",
             "status": "approved",
             "approvedBy": "manager-1",
-            "approvedAt": (now.replace(day=now.day - 1)).isoformat(),
-            "createdAt": (now.replace(day=now.day - 2)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 1)).isoformat()
+            "approvedAt": (now - timedelta(days=1)).isoformat(),
+            "createdAt": (now - timedelta(days=2)).isoformat(),
+            "updatedAt": (now - timedelta(days=1)).isoformat()
         },
         {
             "id": "leave-003",
             "employeeId": "emp-3",
             "employeeName": "David Rodriguez",
             "leaveType": "personal",
-            "startDate": (now.replace(day=now.day + 20)).isoformat(),
-            "endDate": (now.replace(day=now.day + 21)).isoformat(),
+            "startDate": (now + timedelta(days=20)).isoformat(),
+            "endDate": (now + timedelta(days=21)).isoformat(),
             "totalDays": 2,
             "reason": "Doctor appointment",
             "status": "pending",
             "approvedBy": None,
             "approvedAt": None,
-            "createdAt": (now.replace(day=now.day - 3)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 3)).isoformat()
+            "createdAt": (now - timedelta(days=3)).isoformat(),
+            "updatedAt": (now - timedelta(days=3)).isoformat()
         },
         {
             "id": "leave-004",
             "employeeId": "emp-1",
             "employeeName": "Mike Johnson",
             "leaveType": "vacation",
-            "startDate": (now.replace(day=now.day + 30)).isoformat(),
-            "endDate": (now.replace(day=now.day + 37)).isoformat(),
+            "startDate": (now + timedelta(days=30)).isoformat(),
+            "endDate": (now + timedelta(days=37)).isoformat(),
             "totalDays": 6,
             "reason": "Summer break",
             "status": "pending",
             "approvedBy": None,
             "approvedAt": None,
-            "createdAt": (now.replace(day=now.day - 1)).isoformat(),
-            "updatedAt": (now.replace(day=now.day - 1)).isoformat()
+            "createdAt": (now - timedelta(days=1)).isoformat(),
+            "updatedAt": (now - timedelta(days=1)).isoformat()
         }
     ]
     
@@ -227,11 +227,11 @@ async def get_leave_requests(
     if leave_type:
         requests = [req for req in requests if req["leaveType"] == leave_type]
     if start_date:
-        start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-        requests = [req for req in requests if datetime.fromisoformat(req["startDate"].replace('Z', '+00:00')) >= start]
+        start = datetime.fromisoformat(start_date)
+        requests = [req for req in requests if datetime.fromisoformat(req["startDate"]) >= start]
     if end_date:
-        end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-        requests = [req for req in requests if datetime.fromisoformat(req["endDate"].replace('Z', '+00:00')) <= end]
+        end = datetime.fromisoformat(end_date)
+        requests = [req for req in requests if datetime.fromisoformat(req["endDate"]) <= end]
     
     return requests
 
@@ -255,17 +255,23 @@ async def create_leave_request(request: LeaveRequestCreate):
     # Calculate total days
     total_days = calculate_leave_days(request.startDate, request.endDate)
     
-    request_id = f"leave-{len(leave_requests_db) + 1}"
+    request_id = f"leave-{len(leave_requests_db) + 1:03d}"
     now = datetime.now().isoformat()
     
     new_request = LeaveRequest(
         id=request_id,
+        employeeId=request.employeeId,
         employeeName=employee_name,
+        leaveType=request.leaveType,
+        startDate=request.startDate,
+        endDate=request.endDate,
         totalDays=total_days,
+        reason=request.reason,
         status=LeaveStatus.PENDING,
+        approvedBy=None,
+        approvedAt=None,
         createdAt=now,
-        updatedAt=now,
-        **request.dict()
+        updatedAt=now
     )
     
     leave_requests_db[request_id] = new_request.dict()
@@ -282,7 +288,8 @@ async def update_leave_request(request_id: str, request_update: LeaveRequestUpda
     
     # Update fields
     for field, value in update_data.items():
-        existing_request[field] = value
+        if value is not None:
+            existing_request[field] = value
     
     # Recalculate days if dates changed
     if 'startDate' in update_data or 'endDate' in update_data:
@@ -294,6 +301,22 @@ async def update_leave_request(request_id: str, request_update: LeaveRequestUpda
     # Set approved timestamp if status changed to approved
     if 'status' in update_data and update_data['status'] == LeaveStatus.APPROVED:
         existing_request['approvedAt'] = datetime.now().isoformat()
+        # Update leave balance when request is approved
+        if existing_request['employeeId'] in leave_balances_db:
+            balance = leave_balances_db[existing_request['employeeId']]
+            leave_type = existing_request['leaveType']
+            days = existing_request['totalDays']
+            
+            if leave_type == LeaveType.VACATION:
+                balance['usedVacation'] += days
+            elif leave_type == LeaveType.SICK:
+                balance['usedSick'] += days
+            elif leave_type == LeaveType.PERSONAL:
+                balance['usedPersonal'] += days
+            elif leave_type == LeaveType.MATERNITY:
+                balance['usedMaternity'] += days
+            elif leave_type == LeaveType.PATERNITY:
+                balance['usedPaternity'] += days
     
     existing_request['updatedAt'] = datetime.now().isoformat()
     leave_requests_db[request_id] = existing_request
@@ -321,6 +344,23 @@ async def approve_leave_request(request_id: str, approved_by: str):
     request['approvedAt'] = datetime.now().isoformat()
     request['updatedAt'] = datetime.now().isoformat()
     
+    # Update leave balance
+    if request['employeeId'] in leave_balances_db:
+        balance = leave_balances_db[request['employeeId']]
+        leave_type = request['leaveType']
+        days = request['totalDays']
+        
+        if leave_type == LeaveType.VACATION:
+            balance['usedVacation'] += days
+        elif leave_type == LeaveType.SICK:
+            balance['usedSick'] += days
+        elif leave_type == LeaveType.PERSONAL:
+            balance['usedPersonal'] += days
+        elif leave_type == LeaveType.MATERNITY:
+            balance['usedMaternity'] += days
+        elif leave_type == LeaveType.PATERNITY:
+            balance['usedPaternity'] += days
+    
     leave_requests_db[request_id] = request
     return {"message": "Leave request approved", "request": request}
 
@@ -336,6 +376,19 @@ async def reject_leave_request(request_id: str):
     
     leave_requests_db[request_id] = request
     return {"message": "Leave request rejected", "request": request}
+
+@router.post("/requests/{request_id}/cancel")
+async def cancel_leave_request(request_id: str):
+    """Cancel a leave request"""
+    if request_id not in leave_requests_db:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+    
+    request = leave_requests_db[request_id]
+    request['status'] = LeaveStatus.CANCELLED
+    request['updatedAt'] = datetime.now().isoformat()
+    
+    leave_requests_db[request_id] = request
+    return {"message": "Leave request cancelled", "request": request}
 
 @router.get("/balances", response_model=List[LeaveBalance])
 async def get_leave_balances(employee_id: Optional[str] = None):
@@ -362,6 +415,7 @@ async def get_leave_stats():
     total_requests = len(requests)
     pending_requests = len([req for req in requests if req['status'] == 'pending'])
     approved_requests = len([req for req in requests if req['status'] == 'approved'])
+    rejected_requests = len([req for req in requests if req['status'] == 'rejected'])
     
     # Requests by type
     by_type = {}
@@ -374,16 +428,17 @@ async def get_leave_stats():
     current_year = datetime.now().year
     current_month_requests = len([
         req for req in requests 
-        if datetime.fromisoformat(req['startDate'].replace('Z', '+00:00')).month == current_month
-        and datetime.fromisoformat(req['startDate'].replace('Z', '+00:00')).year == current_year
+        if datetime.fromisoformat(req['startDate']).month == current_month
+        and datetime.fromisoformat(req['startDate']).year == current_year
     ])
     
     return {
         "totalRequests": total_requests,
         "pendingRequests": pending_requests,
         "approvedRequests": approved_requests,
+        "rejectedRequests": rejected_requests,
         "currentMonthRequests": current_month_requests,
-        "byType": by_type
+        "requestsByType": by_type
     }
 
 @router.get("/employees")
@@ -395,14 +450,18 @@ async def get_employees_with_balances():
         available_vacation = balance["vacationDays"] - balance["usedVacation"]
         available_sick = balance["sickDays"] - balance["usedSick"]
         available_personal = balance["personalDays"] - balance["usedPersonal"]
+        available_maternity = balance["maternityDays"] - balance["usedMaternity"]
+        available_paternity = balance["paternityDays"] - balance["usedPaternity"]
         
         employees.append({
             "id": balance["employeeId"],
             "name": balance["employeeName"],
-            "availableVacation": available_vacation,
-            "availableSick": available_sick,
-            "availablePersonal": available_personal,
-            "totalUsed": balance["usedVacation"] + balance["usedSick"] + balance["usedPersonal"]
+            "availableVacation": max(0, available_vacation),
+            "availableSick": max(0, available_sick),
+            "availablePersonal": max(0, available_personal),
+            "availableMaternity": max(0, available_maternity),
+            "availablePaternity": max(0, available_paternity),
+            "totalUsed": balance["usedVacation"] + balance["usedSick"] + balance["usedPersonal"] + balance["usedMaternity"] + balance["usedPaternity"]
         })
     
     return {"employees": employees}
@@ -416,12 +475,29 @@ async def get_upcoming_leave(days: int = 30):
     upcoming_requests = []
     
     for request in leave_requests_db.values():
-        start_date = datetime.fromisoformat(request['startDate'].replace('Z', '+00:00'))
+        start_date = datetime.fromisoformat(request['startDate'])
         
         if now <= start_date <= future_date and request['status'] == 'approved':
-            upcoming_requests.append(request)
+            days_until = (start_date - now).days
+            upcoming_requests.append({
+                **request,
+                "daysUntil": days_until
+            })
     
     # Sort by start date
     upcoming_requests.sort(key=lambda x: x['startDate'])
     
-    return {"upcomingRequests": upcoming_requests}
+    return {
+        "count": len(upcoming_requests),
+        "upcomingRequests": upcoming_requests
+    }
+
+@router.get("/types")
+async def get_leave_types():
+    """Get all available leave types"""
+    return {"leaveTypes": [type.value for type in LeaveType]}
+
+@router.get("/statuses")
+async def get_leave_statuses():
+    """Get all available leave statuses"""
+    return {"statuses": [status.value for status in LeaveStatus]}
