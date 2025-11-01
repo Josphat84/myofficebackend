@@ -1,7 +1,7 @@
 ﻿# backend/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import equipment, employees, reports, maintenance, inventory, overtime, standby
+from app.routers import equipment, employees, reports, maintenance, inventory, overtime, standby, ppe, leaves
 
 app = FastAPI(
     title="MyOffice API",
@@ -31,6 +31,8 @@ app.include_router(maintenance.router, prefix="/api/maintenance", tags=["Mainten
 app.include_router(inventory.router, prefix="/api/inventory", tags=["Inventory"])
 app.include_router(overtime.router, prefix="/api/overtime", tags=["Overtime"])
 app.include_router(standby.router, prefix="/api/standby", tags=["Standby"])
+app.include_router(ppe.router, prefix="/api/ppe", tags=["PPE"])
+app.include_router(leaves.router, prefix="/api/leaves", tags=["Leaves"])
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -45,6 +47,8 @@ async def root():
             "inventory": "/api/inventory",
             "overtime": "/api/overtime",
             "standby": "/api/standby",
+            "ppe": "/api/ppe",
+            "leaves": "/api/leaves",
             "health": "/api/health",
             "docs": "/docs"
         }
@@ -62,7 +66,9 @@ async def health_check():
             "maintenance": "operational",
             "inventory": "operational",
             "overtime": "operational",
-            "standby": "operational"
+            "standby": "operational",
+            "ppe": "operational",
+            "leaves": "operational"
         }
     }
 

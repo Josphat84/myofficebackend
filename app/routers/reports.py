@@ -1,18 +1,39 @@
-# app/reports.py
-from flask import Blueprint, request, jsonify, send_file
+# app/routers/reports.py
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 import json
 import csv
 import io
-from werkzeug.security import check_password_hash
-import jwt
-from functools import wraps
+import uuid
 import pandas as pd
 import numpy as np
 from io import BytesIO
 
-# Blueprint for reports
-reports_bp = Blueprint('reports', __name__)
+router = APIRouter(prefix="/api/reports", tags=["reports"])
+
+# Pydantic models for request/response
+class ReportCreate(BaseModel):
+    type: str
+    startDate: Optional[str] = None
+    endDate: Optional[str] = None
+    format: str = "json"
+
+class CustomReportCreate(BaseModel):
+    filters: Dict[str, Any]
+    columns: List[str]
+    format: str = "json"
+
+class ReportResponse(BaseModel):
+    id: str
+    title: str
+    type: str
+    status: str
+    generatedAt: str
+    period: str
+    size: str
+    downloadUrl: str
 
 # Mock data - In production, this would come from your database
 def get_mock_reports():
@@ -282,39 +303,41 @@ def generate_pdf_report(report_type, data, summary):
     return pdf_content
 
 # Routes
-@reports_bp.route('/api/reports', methods=['GET'])
-def get_reports():
+@router.get("/", response_model=List[ReportResponse])
+async def get_reports():
     """Get all reports"""
     try:
         reports = get_mock_reports()
-        return jsonify(reports), 200
+        return reports
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@reports_bp.route('/api/reports/<report_id>', methods=['GET'])
-def get_report(report_id):
+@router.get("/{report_id}", response_model=ReportResponse)
+async def get_report(report_id: str):
     """Get specific report"""
     try:
         reports = get_mock_reports()
         report = next((r for r in reports if r['id'] == report_id), None)
         
         if not report:
-            return jsonify({'error': 'Report not found'}), 404
+            raise HTTPException(status_code=404, detail="Report not found")
             
-        return jsonify(report), 200
+        return report
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@reports_bp.route('/api/reports/<report_id>/download', methods=['GET'])
-def download_report(report_id):
+@router.get("/{report_id}/download")
+async def download_report(
+    report_id: str,
+    format: str = Query("json", description="Download format: json, csv, pdf")
+):
     """Download report in specified format"""
     try:
-        format = request.args.get('format', 'json')
         reports = get_mock_reports()
         report = next((r for r in reports if r['id'] == report_id), None)
         
         if not report:
-            return jsonify({'error': 'Report not found'}), 404
+            raise HTTPException(status_code=404, detail="Report not found")
         
         # Generate report data based on type
         if report['type'] == 'overtime':
@@ -328,67 +351,65 @@ def download_report(report_id):
         elif report['type'] == 'assets':
             report_data = generate_assets_report(format=format)
         else:
-            return jsonify({'error': 'Report type not supported'}), 400
+            raise HTTPException(status_code=400, detail="Report type not supported")
         
         if format == 'csv':
-            response = jsonify({'csv': report_data})
-            response.headers['Content-Type'] = 'text/csv'
-            response.headers['Content-Disposition'] = f'attachment; filename={report["title"].replace(" ", "_")}.csv'
-            return response
+            return {
+                "csv": report_data,
+                "filename": f"{report['title'].replace(' ', '_')}.csv"
+            }
         elif format == 'pdf':
             # In production, return actual PDF file
-            return jsonify({'message': 'PDF generation would happen here', 'data': report_data})
+            return {
+                "message": "PDF generation would happen here", 
+                "data": report_data
+            }
         else:
-            return jsonify(report_data)
+            return report_data
             
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@reports_bp.route('/api/analytics/summary', methods=['GET'])
-def get_analytics_summary_route():
+@router.get("/analytics/summary")
+async def get_analytics_summary_route():
     """Get analytics summary"""
     try:
         summary = get_analytics_summary()
-        return jsonify(summary), 200
+        return summary
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@reports_bp.route('/api/reports/generate', methods=['POST'])
-def generate_report():
+@router.post("/generate")
+async def generate_report(report_data: ReportCreate):
     """Generate a new report"""
     try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        report_type = data.get('type')
-        start_date = data.get('startDate')
-        end_date = data.get('endDate')
-        format = data.get('format', 'json')
+        report_type = report_data.type
+        start_date = report_data.startDate
+        end_date = report_data.endDate
+        format = report_data.format
         
         if not report_type:
-            return jsonify({'error': 'Report type is required'}), 400
+            raise HTTPException(status_code=400, detail="Report type is required")
         
         # Generate report based on type
         if report_type == 'overtime':
-            report_data = generate_overtime_report(start_date, end_date, format)
+            report_data_result = generate_overtime_report(start_date, end_date, format)
         elif report_type == 'personnel':
-            report_data = generate_personnel_report(format)
+            report_data_result = generate_personnel_report(format)
         elif report_type == 'assets':
-            report_data = generate_assets_report(format)
+            report_data_result = generate_assets_report(format)
         elif report_type == 'safety':
             # Placeholder for safety reports
-            report_data = {'message': 'Safety report generation would be implemented here'}
+            report_data_result = {'message': 'Safety report generation would be implemented here'}
         elif report_type == 'maintenance':
             # Placeholder for maintenance reports
-            report_data = {'message': 'Maintenance report generation would be implemented here'}
+            report_data_result = {'message': 'Maintenance report generation would be implemented here'}
         else:
-            return jsonify({'error': 'Invalid report type'}), 400
+            raise HTTPException(status_code=400, detail="Invalid report type")
         
         # Create new report entry
         new_report = {
-            'id': str(len(get_mock_reports()) + 1),
+            'id': str(uuid.uuid4()),
             'title': f'{report_type.title()} Report - {datetime.utcnow().strftime("%Y-%m-%d")}',
             'type': report_type,
             'status': 'generated',
@@ -398,26 +419,26 @@ def generate_report():
             'downloadUrl': f'/api/reports/{len(get_mock_reports()) + 1}/download'
         }
         
-        return jsonify({
+        return {
             'report': new_report,
-            'data': report_data
-        }), 201
+            'data': report_data_result
+        }
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@reports_bp.route('/api/reports/<report_id>', methods=['DELETE'])
-def delete_report(report_id):
+@router.delete("/{report_id}")
+async def delete_report(report_id: str):
     """Delete a report"""
     try:
         # In production, this would delete from database
         # For now, just return success
-        return jsonify({'message': 'Report deleted successfully'}), 200
+        return {"message": "Report deleted successfully"}
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@reports_bp.route('/api/reports/stats', methods=['GET'])
-def get_reports_stats():
+@router.get("/stats/summary")
+async def get_reports_stats():
     """Get reports statistics"""
     try:
         reports = get_mock_reports()
@@ -434,20 +455,18 @@ def get_reports_stats():
             stats['reportsByType'][report['type']] = stats['reportsByType'].get(report['type'], 0) + 1
             stats['reportsByStatus'][report['status']] = stats['reportsByStatus'].get(report['status'], 0) + 1
         
-        return jsonify(stats), 200
+        return stats
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Custom report generation with filters
-@reports_bp.route('/api/reports/custom', methods=['POST'])
-def generate_custom_report():
+@router.post("/custom")
+async def generate_custom_report(custom_report: CustomReportCreate):
     """Generate custom report with advanced filters"""
     try:
-        data = request.get_json()
-        
-        filters = data.get('filters', {})
-        columns = data.get('columns', [])
-        format = data.get('format', 'json')
+        filters = custom_report.filters
+        columns = custom_report.columns
+        format = custom_report.format
         
         # This would query your database based on filters
         # For now, return mock data based on filter type
@@ -460,12 +479,12 @@ def generate_custom_report():
         else:
             report_data = {'message': 'Custom report data would be generated here based on filters'}
         
-        return jsonify({
+        return {
             'filters': filters,
             'columns': columns,
             'data': report_data,
             'generatedAt': datetime.utcnow().isoformat() + 'Z'
-        }), 200
+        }
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
