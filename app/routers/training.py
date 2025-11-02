@@ -1,4 +1,4 @@
-# app/routers/training_certification.py - FastAPI Router for Compliance Management
+# app/routers/training.py - FastAPI Router for Compliance Management
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
@@ -35,7 +35,7 @@ class CertificateRecord(BaseModel):
     expiry_date: date
     required_refresher: str
     certificate_url: Optional[str] = None 
-    status: str # Calculated field
+    status: str = Field(default="Valid")  # Set default value to avoid validation errors
     
     # Ensures status is set correctly when model is initialized
     def update_status(self):
@@ -46,29 +46,54 @@ class CertificateRecord(BaseModel):
 # Initialize the database with mock data
 CERTIFICATIONS_DB: List[CertificateRecord] = [
     CertificateRecord(
-        employee_id='E001', employee_name='John Doe', certification_name='First Aid & CPR', 
-        expiry_date=date(2025, 1, 15), required_refresher='BLS Refresher', department='Safety', 
-        certificate_url='/docs/cert_E001_FA.pdf'
+        employee_id='E001', 
+        employee_name='John Doe', 
+        certification_name='First Aid & CPR', 
+        expiry_date=date(2025, 1, 15), 
+        required_refresher='BLS Refresher', 
+        department='Safety', 
+        certificate_url='/docs/cert_E001_FA.pdf',
+        status='Valid'  # Explicitly set status
     ).update_status(),
     CertificateRecord(
-        employee_id='E002', employee_name='Jane Smith', certification_name='Heavy Equipment Operation', 
-        expiry_date=date(2026, 6, 20), required_refresher='Annual HEO Check', department='Mining',
-        certificate_url='/docs/cert_E002_HEO.pdf'
+        employee_id='E002', 
+        employee_name='Jane Smith', 
+        certification_name='Heavy Equipment Operation', 
+        expiry_date=date(2026, 6, 20), 
+        required_refresher='Annual HEO Check', 
+        department='Mining',
+        certificate_url='/docs/cert_E002_HEO.pdf',
+        status='Valid'
     ).update_status(),
     CertificateRecord(
-        employee_id='E003', employee_name='Mike Johnson', certification_name='Methane Gas Monitoring', 
-        expiry_date=date(2025, 12, 1), required_refresher='Gas Monitor Refresher', department='Geology',
-        certificate_url='/docs/cert_E003_MGM.pdf'
+        employee_id='E003', 
+        employee_name='Mike Johnson', 
+        certification_name='Methane Gas Monitoring', 
+        expiry_date=date(2025, 12, 1), 
+        required_refresher='Gas Monitor Refresher', 
+        department='Geology',
+        certificate_url='/docs/cert_E003_MGM.pdf',
+        status='Valid'
     ).update_status(),
     CertificateRecord(
-        employee_id='E004', employee_name='Sarah Lee', certification_name='Blasting Permit (Surface)', 
-        expiry_date=date(2026, 3, 10), required_refresher='Bi-Annual Recert', department='Mining',
-        certificate_url='/docs/cert_E004_BP.pdf'
+        employee_id='E004', 
+        employee_name='Sarah Lee', 
+        certification_name='Blasting Permit (Surface)', 
+        expiry_date=date(2026, 3, 10), 
+        required_refresher='Bi-Annual Recert', 
+        department='Mining',
+        certificate_url='/docs/cert_E004_BP.pdf',
+        status='Valid'
     ).update_status(),
     CertificateRecord(
-        employee_id='E005', employee_name='Tom Wilson', certification_name='First Aid & CPR', 
-        expiry_date=date(2025, 11, 20), required_refresher='BLS Refresher', department='Safety',
-        certificate_url='/docs/cert_E005_FA.pdf'
+        employee_id='E005', 
+        employee_name='Tom Wilson', 
+        certification_name='First Aid & CPR', 
+        expiry_date=date(2025, 11, 20), 
+        required_refresher='BLS Refresher', 
+        department='Safety',
+        certificate_url='/docs/cert_E005_FA.pdf',
+        status='Valid'
     ).update_status(),
 ]
 
@@ -88,16 +113,15 @@ async def get_all_certifications():
     for record in CERTIFICATIONS_DB:
         record.update_status()
     # Simulate network delay for better user experience on the frontend during loading
-    await time.sleep(0.3) 
+    await asyncio.sleep(0.3) 
     return CERTIFICATIONS_DB
 
-@router.post("/", status_code=201)
+@router.post("/", response_model=CertificateRecord)
 async def create_new_certification(
     employee_id: str = Form(...),
     employee_name: str = Form(...),
     department: str = Form(...),
     certification_name: str = Form(...),
-    # FastAPI handles date parsing from form data
     expiry_date: date = Form(..., description="Format: YYYY-MM-DD"),
     required_refresher: str = Form(...),
     certificate_file: Optional[UploadFile] = File(None)
@@ -112,8 +136,9 @@ async def create_new_certification(
         file_url = f"/storage/certs/{uuid.uuid4()}.{file_extension}"
         
         # Simulate file processing time
-        await time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
+    # Create the certificate record with all required fields including status
     new_record = CertificateRecord(
         employee_id=employee_id,
         employee_name=employee_name,
@@ -121,15 +146,67 @@ async def create_new_certification(
         certification_name=certification_name,
         expiry_date=expiry_date,
         required_refresher=required_refresher,
-        certificate_url=file_url
-    ).update_status()
+        certificate_url=file_url,
+        status=check_status(expiry_date)  # Calculate status immediately
+    )
     
     CERTIFICATIONS_DB.append(new_record)
     
-    return {"message": "Certification record created successfully", "record": new_record}
+    return new_record
 
+@router.get("/{record_id}", response_model=CertificateRecord)
+async def get_certification(record_id: str):
+    """Get a specific certification record by ID."""
+    record = find_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Certification record not found")
+    
+    # Update status before returning
+    record.update_status()
+    return record
 
-@router.delete("/{record_id}", status_code=204)
+@router.put("/{record_id}", response_model=CertificateRecord)
+async def update_certification(
+    record_id: str,
+    employee_id: str = Form(None),
+    employee_name: str = Form(None),
+    department: str = Form(None),
+    certification_name: str = Form(None),
+    expiry_date: date = Form(None),
+    required_refresher: str = Form(None),
+    certificate_file: Optional[UploadFile] = File(None)
+):
+    """Update an existing certification record."""
+    record = find_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Certification record not found")
+    
+    # Update fields if provided
+    if employee_id is not None:
+        record.employee_id = employee_id
+    if employee_name is not None:
+        record.employee_name = employee_name
+    if department is not None:
+        record.department = department
+    if certification_name is not None:
+        record.certification_name = certification_name
+    if expiry_date is not None:
+        record.expiry_date = expiry_date
+    if required_refresher is not None:
+        record.required_refresher = required_refresher
+    
+    # Handle file upload if provided
+    if certificate_file:
+        file_extension = certificate_file.filename.split('.')[-1] if '.' in certificate_file.filename else 'pdf'
+        record.certificate_url = f"/storage/certs/{uuid.uuid4()}.{file_extension}"
+        await asyncio.sleep(0.5)
+    
+    # Update status based on new expiry date
+    record.update_status()
+    
+    return record
+
+@router.delete("/{record_id}")
 async def delete_certification(record_id: str):
     """Deletes a certification record."""
     global CERTIFICATIONS_DB
@@ -141,9 +218,7 @@ async def delete_certification(record_id: str):
     if len(CERTIFICATIONS_DB) == initial_length:
         raise HTTPException(status_code=404, detail="Record not found")
     
-    # REAL WORLD: Delete the corresponding file from storage (S3, GCS, etc.) here.
-    return
-
+    return {"message": "Certification record deleted successfully"}
 
 # --- Compliance Reporting Features ---
 
@@ -180,3 +255,66 @@ async def get_due_refreshers():
     
     # Return the top 3 most-needed refreshers
     return sorted(result, key=lambda x: x['employees_due'], reverse=True)[:3]
+
+@router.get("/employee/{employee_id}", response_model=List[CertificateRecord])
+async def get_employee_certifications(employee_id: str):
+    """Get all certifications for a specific employee."""
+    employee_certs = [rec for rec in CERTIFICATIONS_DB if rec.employee_id == employee_id]
+    
+    # Update status for all records
+    for cert in employee_certs:
+        cert.update_status()
+    
+    return employee_certs
+
+@router.get("/alerts/expiring")
+async def get_expiring_certifications(days: int = 90):
+    """Get certifications expiring within the specified number of days."""
+    today = date.today()
+    expiring_certs = []
+    
+    for cert in CERTIFICATIONS_DB:
+        days_until_expiry = (cert.expiry_date - today).days
+        if 0 <= days_until_expiry <= days:
+            cert_data = cert.dict()
+            cert_data["days_until_expiry"] = days_until_expiry
+            expiring_certs.append(cert_data)
+    
+    # Sort by days until expiry (ascending)
+    expiring_certs.sort(key=lambda x: x["days_until_expiry"])
+    
+    return {
+        "days_threshold": days,
+        "count": len(expiring_certs),
+        "certifications": expiring_certs
+    }
+
+@router.get("/stats/summary")
+async def get_training_stats():
+    """Get training and certification statistics."""
+    total_certifications = len(CERTIFICATIONS_DB)
+    
+    status_counts = {}
+    department_counts = {}
+    
+    for cert in CERTIFICATIONS_DB:
+        # Update status first
+        cert.update_status()
+        
+        # Count by status
+        status = cert.status
+        status_counts[status] = status_counts.get(status, 0) + 1
+        
+        # Count by department
+        department = cert.department
+        department_counts[department] = department_counts.get(department, 0) + 1
+    
+    return {
+        "totalCertifications": total_certifications,
+        "statusDistribution": status_counts,
+        "departmentDistribution": department_counts,
+        "complianceRate": round(((total_certifications - status_counts.get('Expired', 0)) / total_certifications) * 100, 2) if total_certifications > 0 else 100.0
+    }
+
+# Import asyncio for proper async sleep
+import asyncio
