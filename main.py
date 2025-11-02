@@ -7,7 +7,7 @@ from app.routers import (
     equipment, employees, reports, maintenance, inventory, overtime, 
     standby, ppe, leave, 
     # NEW ROUTERS
-    noticeboard, documents, training_certification, operational_viz 
+    noticeboard, documents, training, visualization 
 )
 
 app = FastAPI(
@@ -45,8 +45,8 @@ app.include_router(leave.router, prefix="/api/leave", tags=["Leave"])
 app.include_router(noticeboard.router, tags=["Noticeboard"]) 
 app.include_router(documents.router, tags=["Document Control System"]) 
 # These routers use internal prefixes defined in their files (/api/training and /api/viz)
-app.include_router(training_certification.router, tags=["Training & Certification"])
-app.include_router(operational_viz.router, tags=["Operational Visualization"])
+app.include_router(training.router, tags=["Training & Certification"])
+app.include_router(visualization.router, tags=["Operational Visualization"])
 
 @app.get("/", tags=["Root"])
 async def root():
