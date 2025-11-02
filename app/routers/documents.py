@@ -86,8 +86,8 @@ file_system = {
             ]},
         ]},
         {"id": '2', "name": 'Mining Operations', "type": 'folder', "access": 'Public', "children": [
-            {"id": '2-1', "name": 'Standard Operating Procedures', "type": 'folder', "access": 'Public', "children': [
-                {"id": '2-1-1', "name": 'Blasting Procedure v8.1.pdf', "type": 'pdf', "size": '2048000', "date": '2025-11-05', "version": '8.1', "url": '/files/blasting-proc.pdf', "access": 'Public', "versions': []},
+            {"id": '2-1', "name": 'Standard Operating Procedures', "type": 'folder', "access": 'Public', "children": [
+                {"id": '2-1-1', "name": 'Blasting Procedure v8.1.pdf', "type": 'pdf', "size": '2048000', "date": '2025-11-05', "version": '8.1', "url": '/files/blasting-proc.pdf', "access": 'Public', "versions": []},
             ]},
         ]},
         {"id": '3', "name": 'Processing Plant', "type": 'folder', "access": 'Restricted', "children": []},
