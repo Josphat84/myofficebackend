@@ -1,14 +1,12 @@
 ﻿# backend/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+import traceback
 
-# --- Import ALL existing and new routers ---
-from app.routers import (
-    equipment, employees, reports, maintenance, inventory, overtime, 
-    standby, ppe, leave, 
-    # NEW ROUTERS
-    noticeboard, documents, training, visualization 
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="MyOffice API",
@@ -30,27 +28,95 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Include ALL Routers ---
-app.include_router(equipment.router, prefix="/api/equipment", tags=["Equipment"])
-app.include_router(employees.router, prefix="/api/employees", tags=["Employees"])
-app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
-app.include_router(maintenance.router, prefix="/api/maintenance", tags=["Maintenance"])
-app.include_router(inventory.router, prefix="/api/inventory", tags=["Inventory"])
-app.include_router(overtime.router, prefix="/api/overtime", tags=["Overtime"])  # Only include once here
-app.include_router(standby.router, prefix="/api/standby", tags=["Standby"])
-app.include_router(ppe.router, prefix="/api/ppe", tags=["PPE"])
-app.include_router(leave.router, prefix="/api/leave", tags=["Leave"])
+# Debug: Test if main router works
+@app.get("/api/debug-test")
+async def debug_test():
+    logger.info("🔧 Debug test endpoint called")
+    return {"message": "Debug test - main router working", "status": "success"}
 
-# --- Include the new routers with their prefixes ---
-app.include_router(noticeboard.router, tags=["Noticeboard"]) 
-app.include_router(documents.router, tags=["Document Control System"]) 
-# These routers use internal prefixes defined in their files (/api/training and /api/viz)
-app.include_router(training.router, tags=["Training & Certification"])
-app.include_router(visualization.router, tags=["Operational Visualization"])
+# Debug: Test direct overtime route
+@app.get("/api/debug-overtime-direct")
+async def debug_overtime_direct():
+    logger.info("🔧 Direct overtime debug endpoint called")
+    return {"message": "Direct overtime debug - working", "router": "main"}
+
+# Import and include routers with comprehensive error handling
+logger.info("🔄 Starting router imports...")
+
+try:
+    from app.routers import (
+        equipment, employees, reports, maintenance, inventory, overtime, 
+        standby, ppe, leave, noticeboard, documents, training, visualization 
+    )
+    logger.info("✅ All routers imported successfully")
+    
+    # Log each router's details
+    routers = [
+        ("equipment", equipment.router, "/api/equipment"),
+        ("employees", employees.router, "/api/employees"),
+        ("reports", reports.router, "/api/reports"),
+        ("maintenance", maintenance.router, "/api/maintenance"),
+        ("inventory", inventory.router, "/api/inventory"),
+        ("overtime", overtime.router, "/api/overtime"),
+        ("standby", standby.router, "/api/standby"),
+        ("ppe", ppe.router, "/api/ppe"),
+        ("leave", leave.router, "/api/leave"),
+    ]
+    
+    for name, router, prefix in routers:
+        try:
+            app.include_router(router, prefix=prefix, tags=[name.title()])
+            logger.info(f"✅ {name.title()} router included at {prefix}")
+            logger.info(f"   - Routes: {len(router.routes)}")
+            for route in router.routes:
+                if hasattr(route, 'methods') and hasattr(route, 'path'):
+                    logger.info(f"     {list(route.methods)} {prefix}{route.path}")
+        except Exception as e:
+            logger.error(f"❌ Failed to include {name} router: {e}")
+            logger.error(traceback.format_exc())
+    
+    # Include routers without additional prefix
+    no_prefix_routers = [
+        ("noticeboard", noticeboard.router),
+        ("documents", documents.router),
+        ("training", training.router),
+        ("visualization", visualization.router),
+    ]
+    
+    for name, router in no_prefix_routers:
+        try:
+            app.include_router(router, tags=[name.title()])
+            logger.info(f"✅ {name.title()} router included (no additional prefix)")
+            logger.info(f"   - Routes: {len(router.routes)}")
+            for route in router.routes:
+                if hasattr(route, 'methods') and hasattr(route, 'path'):
+                    logger.info(f"     {list(route.methods)} {route.path}")
+        except Exception as e:
+            logger.error(f"❌ Failed to include {name} router: {e}")
+            logger.error(traceback.format_exc())
+    
+    logger.info("🎉 All routers included successfully!")
+    
+except ImportError as e:
+    logger.error(f"❌ Import error: {e}")
+    logger.error(traceback.format_exc())
+except Exception as e:
+    logger.error(f"❌ Unexpected error during router setup: {e}")
+    logger.error(traceback.format_exc())
+
+# Debug: List all registered routes
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🚀 Application starting up...")
+    logger.info("📋 Registered routes:")
+    for route in app.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = list(route.methods) if hasattr(route, 'methods') else []
+            logger.info(f"   {methods} {route.path}")
 
 @app.get("/", tags=["Root"])
 async def root():
-    # Updated the dictionary to include all new endpoints
+    logger.info("🌐 Root endpoint called")
     return {
         "message": "MyOffice API is running with Supabase!",
         "version": "1.0.0",
@@ -67,10 +133,13 @@ async def root():
             
             # --- NEW ENDPOINTS ---
             "documents": "/api/documents", 
-            "noticeboard": "/api/notices", # Assuming the router uses this prefix
+            "noticeboard": "/api/notices",
             "training": "/api/training",
             "visualization": "/api/viz",
             
+            # --- DEBUG ENDPOINTS ---
+            "debug_test": "/api/debug-test",
+            "debug_overtime": "/api/debug-overtime-direct",
             "health": "/api/health",
             "docs": "/docs"
         }
@@ -78,7 +147,7 @@ async def root():
 
 @app.get("/api/health", tags=["Health"])
 async def health_check():
-    # Updated the dictionary to include all new services
+    logger.info("❤️ Health check called")
     return {
         "status": "healthy",
         "message": "API is working with Supabase",
@@ -101,6 +170,29 @@ async def health_check():
         }
     }
 
+# Debug: Test Supabase connection
+@app.get("/api/debug-supabase")
+async def debug_supabase():
+    logger.info("🔧 Supabase debug endpoint called")
+    try:
+        from app.supabase_client import supabase
+        # Test a simple query
+        result = supabase.table("employees").select("count", count="exact").execute()
+        logger.info(f"✅ Supabase connection test: {result}")
+        return {
+            "status": "success",
+            "message": "Supabase connection working",
+            "employee_count": result.count if hasattr(result, 'count') else "unknown"
+        }
+    except Exception as e:
+        logger.error(f"❌ Supabase connection failed: {e}")
+        return {
+            "status": "error",
+            "message": f"Supabase connection failed: {str(e)}"
+        }
+
 # Vercel handler
 from mangum import Mangum
 handler = Mangum(app)
+
+logger.info("🏁 Main.py setup completed")
