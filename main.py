@@ -40,68 +40,100 @@ async def debug_overtime_direct():
     logger.info("🔧 Direct overtime debug endpoint called")
     return {"message": "Direct overtime debug - working", "router": "main"}
 
+# Debug: Check if overtime router loads
+@app.get("/api/debug-overtime-router")
+async def debug_overtime_router():
+    try:
+        from app.routers import overtime
+        routes = []
+        for route in overtime.router.routes:
+            if hasattr(route, 'methods') and hasattr(route, 'path'):
+                routes.append({
+                    'methods': list(route.methods),
+                    'path': route.path
+                })
+        return {
+            "status": "loaded",
+            "router_routes": routes,
+            "total_routes": len(routes)
+        }
+    except Exception as e:
+        return {
+            "status": "failed", 
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 # Import and include routers with comprehensive error handling
 logger.info("🔄 Starting router imports...")
 
+# CRITICAL FIX: Import each router individually with error handling
+routers_to_import = [
+    "equipment", "employees", "reports", "maintenance", "inventory", 
+    "overtime", "standby", "ppe", "leave", "noticeboard", "documents", 
+    "training", "visualization"
+]
+
+loaded_routers = {}
+
+for router_name in routers_to_import:
+    try:
+        module = __import__(f"app.routers.{router_name}", fromlist=[router_name])
+        router_obj = getattr(module, 'router')
+        loaded_routers[router_name] = router_obj
+        logger.info(f"✅ {router_name.title()} router imported successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to import {router_name} router: {e}")
+        logger.error(traceback.format_exc())
+
+# Now include the successfully loaded routers
 try:
-    from app.routers import (
-        equipment, employees, reports, maintenance, inventory, overtime, 
-        standby, ppe, leave, noticeboard, documents, training, visualization 
-    )
-    logger.info("✅ All routers imported successfully")
-    
-    # Log each router's details
-    routers = [
-        ("equipment", equipment.router, "/api/equipment"),
-        ("employees", employees.router, "/api/employees"),
-        ("reports", reports.router, "/api/reports"),
-        ("maintenance", maintenance.router, "/api/maintenance"),
-        ("inventory", inventory.router, "/api/inventory"),
-        ("overtime", overtime.router, "/api/overtime"),
-        ("standby", standby.router, "/api/standby"),
-        ("ppe", ppe.router, "/api/ppe"),
-        ("leave", leave.router, "/api/leave"),
+    # Routers with prefix
+    prefixed_routers = [
+        ("equipment", loaded_routers.get("equipment"), "/api/equipment"),
+        ("employees", loaded_routers.get("employees"), "/api/employees"),
+        ("reports", loaded_routers.get("reports"), "/api/reports"),
+        ("maintenance", loaded_routers.get("maintenance"), "/api/maintenance"),
+        ("inventory", loaded_routers.get("inventory"), "/api/inventory"),
+        ("overtime", loaded_routers.get("overtime"), "/api/overtime"),  # THIS IS CRITICAL
+        ("standby", loaded_routers.get("standby"), "/api/standby"),
+        ("ppe", loaded_routers.get("ppe"), "/api/ppe"),
+        ("leave", loaded_routers.get("leave"), "/api/leave"),
     ]
     
-    for name, router, prefix in routers:
-        try:
-            app.include_router(router, prefix=prefix, tags=[name.title()])
-            logger.info(f"✅ {name.title()} router included at {prefix}")
-            logger.info(f"   - Routes: {len(router.routes)}")
-            for route in router.routes:
-                if hasattr(route, 'methods') and hasattr(route, 'path'):
-                    logger.info(f"     {list(route.methods)} {prefix}{route.path}")
-        except Exception as e:
-            logger.error(f"❌ Failed to include {name} router: {e}")
-            logger.error(traceback.format_exc())
+    for name, router, prefix in prefixed_routers:
+        if router:
+            try:
+                app.include_router(router, prefix=prefix, tags=[name.title()])
+                logger.info(f"✅ {name.title()} router included at {prefix}")
+                logger.info(f"   - Routes: {len(router.routes)}")
+            except Exception as e:
+                logger.error(f"❌ Failed to include {name} router: {e}")
+        else:
+            logger.error(f"❌ {name.title()} router not available for inclusion")
     
     # Include routers without additional prefix
     no_prefix_routers = [
-        ("noticeboard", noticeboard.router),
-        ("documents", documents.router),
-        ("training", training.router),
-        ("visualization", visualization.router),
+        ("noticeboard", loaded_routers.get("noticeboard")),
+        ("documents", loaded_routers.get("documents")),
+        ("training", loaded_routers.get("training")),
+        ("visualization", loaded_routers.get("visualization")),
     ]
     
     for name, router in no_prefix_routers:
-        try:
-            app.include_router(router, tags=[name.title()])
-            logger.info(f"✅ {name.title()} router included (no additional prefix)")
-            logger.info(f"   - Routes: {len(router.routes)}")
-            for route in router.routes:
-                if hasattr(route, 'methods') and hasattr(route, 'path'):
-                    logger.info(f"     {list(route.methods)} {route.path}")
-        except Exception as e:
-            logger.error(f"❌ Failed to include {name} router: {e}")
-            logger.error(traceback.format_exc())
+        if router:
+            try:
+                app.include_router(router, tags=[name.title()])
+                logger.info(f"✅ {name.title()} router included (no additional prefix)")
+            except Exception as e:
+                logger.error(f"❌ Failed to include {name} router: {e}")
+        else:
+            logger.error(f"❌ {name.title()} router not available for inclusion")
     
-    logger.info("🎉 All routers included successfully!")
+    logger.info("🎉 Router inclusion completed!")
     
-except ImportError as e:
-    logger.error(f"❌ Import error: {e}")
-    logger.error(traceback.format_exc())
 except Exception as e:
-    logger.error(f"❌ Unexpected error during router setup: {e}")
+    logger.error(f"❌ Error during router inclusion: {e}")
     logger.error(traceback.format_exc())
 
 # Debug: List all registered routes
@@ -109,10 +141,21 @@ except Exception as e:
 async def startup_event():
     logger.info("🚀 Application starting up...")
     logger.info("📋 Registered routes:")
+    overtime_routes = []
     for route in app.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
             methods = list(route.methods) if hasattr(route, 'methods') else []
-            logger.info(f"   {methods} {route.path}")
+            path_info = f"   {methods} {route.path}"
+            logger.info(path_info)
+            if '/api/overtime' in str(route.path):
+                overtime_routes.append(path_info)
+    
+    if overtime_routes:
+        logger.info("🎯 Overtime routes found:")
+        for route in overtime_routes:
+            logger.info(route)
+    else:
+        logger.error("❌ No overtime routes found!")
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -140,6 +183,7 @@ async def root():
             # --- DEBUG ENDPOINTS ---
             "debug_test": "/api/debug-test",
             "debug_overtime": "/api/debug-overtime-direct",
+            "debug_overtime_router": "/api/debug-overtime-router",
             "health": "/api/health",
             "docs": "/docs"
         }
@@ -169,27 +213,6 @@ async def health_check():
             "operational_viz": "operational"
         }
     }
-
-# Debug: Test Supabase connection
-@app.get("/api/debug-supabase")
-async def debug_supabase():
-    logger.info("🔧 Supabase debug endpoint called")
-    try:
-        from app.supabase_client import supabase
-        # Test a simple query
-        result = supabase.table("employees").select("count", count="exact").execute()
-        logger.info(f"✅ Supabase connection test: {result}")
-        return {
-            "status": "success",
-            "message": "Supabase connection working",
-            "employee_count": result.count if hasattr(result, 'count') else "unknown"
-        }
-    except Exception as e:
-        logger.error(f"❌ Supabase connection failed: {e}")
-        return {
-            "status": "error",
-            "message": f"Supabase connection failed: {str(e)}"
-        }
 
 # Vercel handler
 from mangum import Mangum
