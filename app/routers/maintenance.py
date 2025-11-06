@@ -1,444 +1,434 @@
-# app/routers/maintenance.py
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
+from typing import List, Optional
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import uuid
 
 router = APIRouter()
 
-# Self-contained models
-class MaintenanceStatus(str):
-    PENDING = "pending"
-    SCHEDULED = "scheduled"
-    IN_PROGRESS = "in-progress"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-
-class MaintenancePriority(str):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
-class ChecklistItem(BaseModel):
-    task: str
-    completed: bool = False
-
+# Pydantic Models (UPDATED - all IDs as int)
 class WorkOrderCreate(BaseModel):
+    machine_id: int
     title: str
-    equipment_id: str
-    equipment_name: str
-    description: str
-    priority: str
-    category: str
-    location: str
-    assigned_to: Optional[str] = None
-    assigned_to_name: Optional[str] = None
-    scheduled_date: Optional[str] = None
+    description: Optional[str] = None
+    priority: str = "medium"
+    assigned_to: Optional[int] = None  # CHANGED to Optional[int]
+    scheduled_date: Optional[date] = None
+    due_date: Optional[date] = None
     estimated_hours: Optional[float] = None
-    reported_by: Optional[str] = None
-    reported_by_name: Optional[str] = None
-    notes: Optional[str] = None
-    checklist: List[ChecklistItem] = []
+    tasks: Optional[List[str]] = None
 
 class WorkOrderUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    status: Optional[str] = None
     priority: Optional[str] = None
-    category: Optional[str] = None
-    location: Optional[str] = None
-    assigned_to: Optional[str] = None
-    assigned_to_name: Optional[str] = None
-    scheduled_date: Optional[str] = None
-    estimated_hours: Optional[float] = None
+    status: Optional[str] = None
+    assigned_to: Optional[int] = None  # CHANGED to Optional[int]
+    scheduled_date: Optional[date] = None
+    due_date: Optional[date] = None
     actual_hours: Optional[float] = None
-    cost: Optional[float] = None
-    completed_date: Optional[str] = None
+
+class TaskUpdate(BaseModel):
+    completed: bool
     notes: Optional[str] = None
-    checklist: Optional[List[ChecklistItem]] = None
 
-class WorkOrderResponse(BaseModel):
-    id: str
+class JobCardCreate(BaseModel):
+    work_performed: str
+    parts_used: Optional[List[dict]] = None
+    labor_hours: float
+    technician_notes: Optional[str] = None
+    supervisor_notes: Optional[str] = None
+
+class RecurringMaintenanceCreate(BaseModel):
+    machine_id: int
     title: str
-    equipment_id: str
-    equipment_name: str
-    description: str
-    priority: str
-    category: str
-    location: str
-    status: str
-    assigned_to: Optional[str]
-    assigned_to_name: Optional[str]
-    reported_by: Optional[str]
-    reported_by_name: Optional[str]
-    scheduled_date: Optional[str]
-    completed_date: Optional[str]
-    estimated_hours: Optional[float]
-    actual_hours: Optional[float]
-    cost: Optional[float]
-    notes: Optional[str]
-    checklist: List[ChecklistItem]
-    created_at: str
-    updated_at: str
+    description: Optional[str] = None
+    frequency_days: int
+    frequency_type: str = "days"
 
-class MaintenanceAssign(BaseModel):
-    assigned_to: str
-    assigned_to_name: str
-
-class MaintenanceComplete(BaseModel):
-    actual_hours: float
-    cost: float
-    notes: str
-
-# Mock database
-work_orders_db = {}
-
-# Initialize with sample data
-def initialize_sample_data():
-    if not work_orders_db:
-        now = datetime.now()
-        sample_orders = [
-            {
-                "id": "maint-001",
-                "title": "CNC Machine Calibration",
-                "equipment_id": "eq-001",
-                "equipment_name": "CNC Machine #1",
-                "description": "Routine calibration and maintenance for CNC machine #1",
-                "priority": "medium",
-                "category": "equipment",
-                "location": "Production Floor A",
-                "status": "completed",
-                "assigned_to": "emp-2",
-                "assigned_to_name": "Sarah Chen",
-                "reported_by": "emp-1",
-                "reported_by_name": "Mike Johnson",
-                "scheduled_date": (now - timedelta(days=2)).isoformat(),
-                "completed_date": (now - timedelta(days=1)).isoformat(),
-                "estimated_hours": 4.0,
-                "actual_hours": 3.5,
-                "cost": 0.0,
-                "notes": "Calibration completed successfully. Machine operating within specifications.",
-                "checklist": [
-                    {"task": "Check calibration settings", "completed": True},
-                    {"task": "Test machine operation", "completed": True},
-                    {"task": "Update maintenance log", "completed": True}
-                ],
-                "created_at": (now - timedelta(days=5)).isoformat(),
-                "updated_at": (now - timedelta(days=1)).isoformat()
-            },
-            {
-                "id": "maint-002",
-                "title": "Forklift Hydraulic Leak",
-                "equipment_id": "eq-002",
-                "equipment_name": "Forklift #3",
-                "description": "Hydraulic fluid leak detected in forklift #3. Needs immediate attention.",
-                "priority": "high",
-                "category": "vehicle",
-                "location": "Warehouse",
-                "status": "in-progress",
-                "assigned_to": "emp-3",
-                "assigned_to_name": "David Rodriguez",
-                "reported_by": "emp-4",
-                "reported_by_name": "Emily Watson",
-                "scheduled_date": now.isoformat(),
-                "completed_date": None,
-                "estimated_hours": 6.0,
-                "actual_hours": None,
-                "cost": None,
-                "notes": "Seal replacement required. Parts ordered, ETA 2 days.",
-                "checklist": [
-                    {"task": "Identify leak source", "completed": True},
-                    {"task": "Order replacement parts", "completed": True},
-                    {"task": "Replace hydraulic seal", "completed": False},
-                    {"task": "Test forklift operation", "completed": False}
-                ],
-                "created_at": (now - timedelta(days=1)).isoformat(),
-                "updated_at": now.isoformat()
-            },
-            {
-                "id": "maint-003",
-                "title": "Server Room Cooling Issue",
-                "equipment_id": "eq-003",
-                "equipment_name": "Server Rack A",
-                "description": "Temperature rising in server room. AC unit not maintaining set temperature.",
-                "priority": "critical",
-                "category": "it",
-                "location": "Server Room",
-                "status": "open",
-                "assigned_to": None,
-                "assigned_to_name": None,
-                "reported_by": "emp-5",
-                "reported_by_name": "Alex Kim",
-                "scheduled_date": None,
-                "completed_date": None,
-                "estimated_hours": 3.0,
-                "actual_hours": None,
-                "cost": None,
-                "notes": "Urgent - server temperatures approaching critical levels.",
-                "checklist": [
-                    {"task": "Check AC unit operation", "completed": False},
-                    {"task": "Monitor server temperatures", "completed": False},
-                    {"task": "Contact HVAC technician", "completed": False}
-                ],
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat()
-            },
-            {
-                "id": "maint-004",
-                "title": "Preventive Maintenance - Production Line",
-                "equipment_id": "eq-004",
-                "equipment_name": "Production Line B",
-                "description": "Monthly preventive maintenance for production line B",
-                "priority": "medium",
-                "category": "preventive",
-                "location": "Production Floor B",
-                "status": "scheduled",
-                "assigned_to": "emp-2",
-                "assigned_to_name": "Sarah Chen",
-                "reported_by": "emp-1",
-                "reported_by_name": "Mike Johnson",
-                "scheduled_date": (now + timedelta(days=3)).isoformat(),
-                "completed_date": None,
-                "estimated_hours": 8.0,
-                "actual_hours": None,
-                "cost": None,
-                "notes": "Routine maintenance including belt checks, lubrication, and calibration.",
-                "checklist": [
-                    {"task": "Check conveyor belts", "completed": False},
-                    {"task": "Lubricate moving parts", "completed": False},
-                    {"task": "Calibration check", "completed": False},
-                    {"task": "Safety system test", "completed": False}
-                ],
-                "created_at": (now - timedelta(days=2)).isoformat(),
-                "updated_at": (now - timedelta(days=1)).isoformat()
-            }
-        ]
+# Work Order Routes (UPDATED for integer IDs)
+@router.post("/work-orders", tags=["Maintenance"])
+async def create_work_order(work_order: WorkOrderCreate):
+    try:
+        work_order_number = f"WO-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
         
-        for order in sample_orders:
-            work_orders_db[order["id"]] = order
+        # First, verify the machine exists
+        machine_check = """
+            SELECT id, name FROM equipment WHERE id = $1
+        """
+        machine = await database.fetch_one(machine_check, work_order.machine_id)
+        
+        if not machine:
+            raise HTTPException(status_code=404, detail="Machine not found")
+        
+        # Verify assigned employee exists if provided
+        if work_order.assigned_to:
+            employee_check = """
+                SELECT id, name FROM employees WHERE id = $1
+            """
+            employee = await database.fetch_one(employee_check, work_order.assigned_to)
+            if not employee:
+                raise HTTPException(status_code=404, detail="Assigned employee not found")
+        
+        # Insert work order
+        query = """
+            INSERT INTO maintenance_work_orders 
+            (work_order_number, machine_id, title, description, priority, assigned_to, 
+             scheduled_date, due_date, estimated_hours, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING *
+        """
+        result = await database.fetch_one(query, 
+            work_order_number, work_order.machine_id, work_order.title, 
+            work_order.description, work_order.priority, work_order.assigned_to,
+            work_order.scheduled_date, work_order.due_date, work_order.estimated_hours,
+            1  # Replace with actual user ID from auth (integer)
+        )
+        
+        # Insert tasks if provided
+        if work_order.tasks:
+            for task_desc in work_order.tasks:
+                task_query = """
+                    INSERT INTO maintenance_tasks (work_order_id, task_description)
+                    VALUES ($1, $2)
+                """
+                await database.execute(task_query, result["id"], task_desc)
+        
+        return {
+            "message": "Work order created successfully", 
+            "data": result,
+            "machine_name": machine["name"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating work order: {str(e)}")
 
-# Initialize sample data on startup
-@router.on_event("startup")
-async def startup_event():
-    initialize_sample_data()
-
-# Routes
-@router.get("/", response_model=List[WorkOrderResponse])
+@router.get("/work-orders", tags=["Maintenance"])
 async def get_work_orders(
     status: Optional[str] = Query(None),
     priority: Optional[str] = Query(None),
-    category: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    skip: int = 0,
-    limit: int = 100
+    machine_id: Optional[int] = Query(None),
+    assigned_to: Optional[int] = Query(None),  # CHANGED to int
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100)
 ):
-    """Get all work orders with filtering and pagination"""
-    filtered_orders = list(work_orders_db.values())
-    
-    # Apply filters
-    if status:
-        filtered_orders = [wo for wo in filtered_orders if wo["status"] == status]
-    if priority:
-        filtered_orders = [wo for wo in filtered_orders if wo["priority"] == priority]
-    if category:
-        filtered_orders = [wo for wo in filtered_orders if wo["category"] == category]
-    if search:
-        search_lower = search.lower()
-        filtered_orders = [
-            wo for wo in filtered_orders 
-            if search_lower in wo["title"].lower() or search_lower in wo["description"].lower()
-        ]
-    
-    return filtered_orders[skip:skip + limit]
+    try:
+        base_query = """
+            SELECT wo.*, 
+                   e.name as machine_name, 
+                   e.serial_number,
+                   emp.name as assigned_to_name,
+                   creator.name as created_by_name
+            FROM maintenance_work_orders wo
+            LEFT JOIN equipment e ON wo.machine_id = e.id
+            LEFT JOIN employees emp ON wo.assigned_to = emp.id
+            LEFT JOIN employees creator ON wo.created_by = creator.id
+            WHERE 1=1
+        """
+        count_query = """
+            SELECT COUNT(*) 
+            FROM maintenance_work_orders wo
+            WHERE 1=1
+        """
+        
+        params = []
+        param_count = 0
+        
+        if status:
+            param_count += 1
+            base_query += f" AND wo.status = ${param_count}"
+            count_query += f" AND wo.status = ${param_count}"
+            params.append(status)
+        
+        if priority:
+            param_count += 1
+            base_query += f" AND wo.priority = ${param_count}"
+            count_query += f" AND wo.priority = ${param_count}"
+            params.append(priority)
+            
+        if machine_id:
+            param_count += 1
+            base_query += f" AND wo.machine_id = ${param_count}"
+            count_query += f" AND wo.machine_id = ${param_count}"
+            params.append(machine_id)
+            
+        if assigned_to:
+            param_count += 1
+            base_query += f" AND wo.assigned_to = ${param_count}"
+            count_query += f" AND wo.assigned_to = ${param_count}"
+            params.append(assigned_to)
+        
+        # Add ordering and pagination
+        base_query += " ORDER BY wo.created_at DESC"
+        offset = (page - 1) * limit
+        base_query += f" LIMIT ${param_count + 1} OFFSET ${param_count + 2}"
+        params.extend([limit, offset])
+        
+        # Execute queries
+        work_orders = await database.fetch_all(base_query, *params)
+        total = await database.fetch_val(count_query, *params[:param_count])
+        
+        return {
+            "data": work_orders,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": (total + limit - 1) // limit
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching work orders: {str(e)}")
 
-@router.get("/{work_order_id}", response_model=WorkOrderResponse)
-async def get_work_order(work_order_id: str):
-    """Get a specific work order by ID"""
-    if work_order_id not in work_orders_db:
-        raise HTTPException(status_code=404, detail="Work order not found")
-    return work_orders_db[work_order_id]
+@router.get("/work-orders/{work_order_id}", tags=["Maintenance"])
+async def get_work_order_details(work_order_id: int):  # CHANGED to int
+    try:
+        # Get work order with details
+        wo_query = """
+            SELECT wo.*, 
+                   e.name as machine_name, e.serial_number, e.model,
+                   emp.name as assigned_to_name, emp.email as assigned_to_email,
+                   creator.name as created_by_name
+            FROM maintenance_work_orders wo
+            LEFT JOIN equipment e ON wo.machine_id = e.id
+            LEFT JOIN employees emp ON wo.assigned_to = emp.id
+            LEFT JOIN employees creator ON wo.created_by = creator.id
+            WHERE wo.id = $1
+        """
+        work_order = await database.fetch_one(wo_query, work_order_id)
+        
+        if not work_order:
+            raise HTTPException(status_code=404, detail="Work order not found")
+        
+        # Get tasks
+        tasks_query = """
+            SELECT t.*, emp.name as completed_by_name
+            FROM maintenance_tasks t
+            LEFT JOIN employees emp ON t.completed_by = emp.id
+            WHERE t.work_order_id = $1
+            ORDER BY t.created_at
+        """
+        tasks = await database.fetch_all(tasks_query, work_order_id)
+        
+        # Get job cards
+        job_cards_query = """
+            SELECT jc.*, emp.name as completed_by_name
+            FROM maintenance_job_cards jc
+            LEFT JOIN employees emp ON jc.completed_by = emp.id
+            WHERE jc.work_order_id = $1
+            ORDER BY jc.completed_at DESC
+        """
+        job_cards = await database.fetch_all(job_cards_query, work_order_id)
+        
+        return {
+            "work_order": work_order,
+            "tasks": tasks,
+            "job_cards": job_cards
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching work order details: {str(e)}")
 
-@router.post("/", response_model=WorkOrderResponse)
-async def create_work_order(work_order: WorkOrderCreate):
-    """Create a new work order"""
-    work_order_id = f"maint-{str(uuid.uuid4())[:8]}"
-    now = datetime.now().isoformat()
-    
-    new_work_order = {
-        "id": work_order_id,
-        "title": work_order.title,
-        "equipment_id": work_order.equipment_id,
-        "equipment_name": work_order.equipment_name,
-        "description": work_order.description,
-        "priority": work_order.priority,
-        "category": work_order.category,
-        "location": work_order.location,
-        "status": "open",
-        "assigned_to": work_order.assigned_to,
-        "assigned_to_name": work_order.assigned_to_name,
-        "reported_by": work_order.reported_by,
-        "reported_by_name": work_order.reported_by_name,
-        "scheduled_date": work_order.scheduled_date,
-        "completed_date": None,
-        "estimated_hours": work_order.estimated_hours,
-        "actual_hours": None,
-        "cost": None,
-        "notes": work_order.notes,
-        "checklist": work_order.checklist,
-        "created_at": now,
-        "updated_at": now
-    }
-    
-    work_orders_db[work_order_id] = new_work_order
-    return new_work_order
+@router.put("/work-orders/{work_order_id}", tags=["Maintenance"])
+async def update_work_order(work_order_id: int, update_data: WorkOrderUpdate):  # CHANGED to int
+    try:
+        # Verify assigned employee exists if provided
+        if update_data.assigned_to:
+            employee_check = """
+                SELECT id, name FROM employees WHERE id = $1
+            """
+            employee = await database.fetch_one(employee_check, update_data.assigned_to)
+            if not employee:
+                raise HTTPException(status_code=404, detail="Assigned employee not found")
+        
+        # Build dynamic update query
+        update_fields = []
+        params = []
+        param_count = 0
+        
+        for field, value in update_data.dict(exclude_unset=True).items():
+            param_count += 1
+            update_fields.append(f"{field} = ${param_count}")
+            params.append(value)
+        
+        if not update_fields:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        
+        param_count += 1
+        update_fields.append(f"updated_at = ${param_count}")
+        params.append(datetime.now())
+        
+        param_count += 1
+        params.append(work_order_id)
+        
+        query = f"""
+            UPDATE maintenance_work_orders 
+            SET {', '.join(update_fields)}
+            WHERE id = ${param_count}
+            RETURNING *
+        """
+        
+        result = await database.fetch_one(query, *params)
+        return {"message": "Work order updated successfully", "data": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating work order: {str(e)}")
 
-@router.put("/{work_order_id}", response_model=WorkOrderResponse)
-async def update_work_order(work_order_id: str, updates: WorkOrderUpdate):
-    """Update an existing work order"""
-    if work_order_id not in work_orders_db:
-        raise HTTPException(status_code=404, detail="Work order not found")
-    
-    existing_order = work_orders_db[work_order_id]
-    update_data = updates.dict(exclude_unset=True)
-    
-    # Update fields
-    for field, value in update_data.items():
-        if value is not None:
-            existing_order[field] = value
-    
-    existing_order["updated_at"] = datetime.now().isoformat()
-    work_orders_db[work_order_id] = existing_order
-    
-    return existing_order
+@router.post("/work-orders/{work_order_id}/complete", tags=["Maintenance"])
+async def complete_work_order(work_order_id: int, job_card: JobCardCreate):  # CHANGED to int
+    try:
+        async with database.transaction():
+            # Update work order status
+            update_wo_query = """
+                UPDATE maintenance_work_orders 
+                SET status = 'completed', completed_date = $1, actual_hours = $2
+                WHERE id = $3
+                RETURNING *
+            """
+            await database.execute(update_wo_query, datetime.now(), job_card.labor_hours, work_order_id)
+            
+            # Create job card
+            job_card_query = """
+                INSERT INTO maintenance_job_cards 
+                (work_order_id, work_performed, parts_used, labor_hours, 
+                 technician_notes, supervisor_notes, completed_by)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING *
+            """
+            result = await database.fetch_one(
+                job_card_query, work_order_id, job_card.work_performed,
+                job_card.parts_used, job_card.labor_hours, job_card.technician_notes,
+                job_card.supervisor_notes, 1  # Replace with actual user ID (integer)
+            )
+            
+            return {"message": "Work order completed successfully", "job_card": result}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error completing work order: {str(e)}")
 
-@router.put("/{work_order_id}/assign", response_model=WorkOrderResponse)
-async def assign_work_order(work_order_id: str, assign_data: MaintenanceAssign):
-    """Assign a work order to a technician"""
-    if work_order_id not in work_orders_db:
-        raise HTTPException(status_code=404, detail="Work order not found")
-    
-    work_orders_db[work_order_id]["assigned_to"] = assign_data.assigned_to
-    work_orders_db[work_order_id]["assigned_to_name"] = assign_data.assigned_to_name
-    work_orders_db[work_order_id]["status"] = "in-progress"
-    work_orders_db[work_order_id]["updated_at"] = datetime.now().isoformat()
-    
-    return work_orders_db[work_order_id]
+# Bulk Job Card Generation
+@router.post("/work-orders/bulk-complete", tags=["Maintenance"])
+async def bulk_complete_work_orders(work_order_ids: List[int]):  # CHANGED to List[int]
+    try:
+        completed = []
+        for wo_id in work_order_ids:
+            # Update each work order to completed
+            query = """
+                UPDATE maintenance_work_orders 
+                SET status = 'completed', completed_date = $1
+                WHERE id = $2
+                RETURNING work_order_number
+            """
+            result = await database.fetch_one(query, datetime.now(), wo_id)
+            completed.append(result["work_order_number"])
+        
+        return {"message": f"Completed {len(completed)} work orders", "completed": completed}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in bulk completion: {str(e)}")
 
-@router.put("/{work_order_id}/complete", response_model=WorkOrderResponse)
-async def complete_work_order(work_order_id: str, complete_data: MaintenanceComplete):
-    """Mark a work order as completed"""
-    if work_order_id not in work_orders_db:
-        raise HTTPException(status_code=404, detail="Work order not found")
-    
-    work_orders_db[work_order_id]["status"] = "completed"
-    work_orders_db[work_order_id]["completed_date"] = datetime.now().isoformat()
-    work_orders_db[work_order_id]["actual_hours"] = complete_data.actual_hours
-    work_orders_db[work_order_id]["cost"] = complete_data.cost
-    work_orders_db[work_order_id]["notes"] = complete_data.notes
-    work_orders_db[work_order_id]["updated_at"] = datetime.now().isoformat()
-    
-    # Mark all checklist items as completed
-    for item in work_orders_db[work_order_id]["checklist"]:
-        item["completed"] = True
-    
-    return work_orders_db[work_order_id]
+# Recurring Maintenance Routes
+@router.post("/recurring-maintenance", tags=["Maintenance"])
+async def create_recurring_maintenance(recurring: RecurringMaintenanceCreate):
+    try:
+        # Verify machine exists
+        machine_check = """
+            SELECT id, name FROM equipment WHERE id = $1
+        """
+        machine = await database.fetch_one(machine_check, recurring.machine_id)
+        
+        if not machine:
+            raise HTTPException(status_code=404, detail="Machine not found")
+        
+        query = """
+            INSERT INTO recurring_maintenance 
+            (machine_id, title, description, frequency_days, frequency_type)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *
+        """
+        result = await database.fetch_one(query, 
+            recurring.machine_id, recurring.title, recurring.description,
+            recurring.frequency_days, recurring.frequency_type
+        )
+        
+        return {
+            "message": "Recurring maintenance created", 
+            "data": result,
+            "machine_name": machine["name"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating recurring maintenance: {str(e)}")
 
-@router.delete("/{work_order_id}")
-async def delete_work_order(work_order_id: str):
-    """Delete a work order"""
-    if work_order_id not in work_orders_db:
-        raise HTTPException(status_code=404, detail="Work order not found")
-    
-    del work_orders_db[work_order_id]
-    return {"message": "Work order deleted successfully"}
+@router.post("/recurring-maintenance/generate-work-orders", tags=["Maintenance"])
+async def generate_recurring_work_orders():
+    try:
+        # Find recurring maintenance that's due
+        query = """
+            SELECT rm.*, e.name as machine_name
+            FROM recurring_maintenance rm
+            JOIN equipment e ON rm.machine_id = e.id
+            WHERE rm.is_active = true 
+            AND (rm.next_due_date IS NULL OR rm.next_due_date <= CURRENT_DATE)
+        """
+        due_maintenance = await database.fetch_all(query)
+        
+        generated = []
+        for maintenance in due_maintenance:
+            # Create work order
+            wo_number = f"WO-RECUR-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+            
+            wo_query = """
+                INSERT INTO maintenance_work_orders 
+                (work_order_number, machine_id, title, description, priority, scheduled_date)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING *
+            """
+            work_order = await database.fetch_one(wo_query,
+                wo_number, maintenance["machine_id"], maintenance["title"],
+                maintenance["description"], "medium", date.today()
+            )
+            
+            # Update next due date
+            next_due = date.today() + timedelta(days=maintenance["frequency_days"])
+            update_recur_query = """
+                UPDATE recurring_maintenance 
+                SET last_performed = $1, next_due_date = $2
+                WHERE id = $3
+            """
+            await database.execute(update_recur_query, date.today(), next_due, maintenance["id"])
+            
+            generated.append(work_order["work_order_number"])
+        
+        return {"message": f"Generated {len(generated)} work orders", "work_orders": generated}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating work orders: {str(e)}")
 
-@router.get("/equipment/{equipment_id}/history")
-async def get_equipment_maintenance_history(equipment_id: str):
-    """Get maintenance history for specific equipment"""
-    equipment_orders = [
-        wo for wo in work_orders_db.values() 
-        if wo["equipment_id"] == equipment_id
-    ]
-    return sorted(equipment_orders, key=lambda x: x["created_at"], reverse=True)
-
-@router.get("/stats/summary")
-async def get_maintenance_stats():
-    """Get maintenance statistics for dashboard"""
-    total_orders = len(work_orders_db)
-    completed_orders = len([wo for wo in work_orders_db.values() if wo["status"] == "completed"])
-    in_progress_orders = len([wo for wo in work_orders_db.values() if wo["status"] == "in-progress"])
-    open_orders = len([wo for wo in work_orders_db.values() if wo["status"] == "open"])
-    scheduled_orders = len([wo for wo in work_orders_db.values() if wo["status"] == "scheduled"])
-    critical_orders = len([wo for wo in work_orders_db.values() if wo["priority"] == "critical"])
-    
-    # Calculate overdue orders
-    now = datetime.now()
-    overdue_orders = len([
-        wo for wo in work_orders_db.values() 
-        if wo["status"] in ["open", "in-progress", "scheduled"] and 
-        wo["scheduled_date"] and 
-        datetime.fromisoformat(wo["scheduled_date"]) < now
-    ])
-    
-    # Calculate total costs and hours
-    total_cost = sum(wo["cost"] for wo in work_orders_db.values() if wo["cost"] is not None)
-    total_actual_hours = sum(wo["actual_hours"] for wo in work_orders_db.values() if wo["actual_hours"] is not None)
-    
-    return {
-        "total": total_orders,
-        "open": open_orders,
-        "scheduled": scheduled_orders,
-        "in_progress": in_progress_orders,
-        "completed": completed_orders,
-        "critical": critical_orders,
-        "overdue": overdue_orders,
-        "total_cost": round(total_cost, 2),
-        "total_hours": round(total_actual_hours, 2),
-        "completion_rate": round((completed_orders / total_orders * 100), 1) if total_orders > 0 else 0
-    }
-
-@router.get("/categories/list")
-async def get_maintenance_categories():
-    """Get available maintenance categories and types"""
-    return {
-        "categories": [
-            "equipment", "facility", "vehicle", "safety", "it", "preventive"
-        ],
-        "statuses": [
-            "open", "in-progress", "completed", "cancelled", "scheduled"
-        ],
-        "priorities": [
-            "low", "medium", "high", "critical"
-        ]
-    }
-
-@router.get("/equipment/list")
-async def get_equipment_list():
-    """Get available equipment for maintenance"""
-    equipment_list = [
-        {"id": "eq-001", "name": "CNC Machine #1", "category": "equipment", "location": "Production Floor A"},
-        {"id": "eq-002", "name": "Forklift #3", "category": "vehicle", "location": "Warehouse"},
-        {"id": "eq-003", "name": "Server Rack A", "category": "it", "location": "Server Room"},
-        {"id": "eq-004", "name": "HVAC Unit North", "category": "facility", "location": "Roof"},
-        {"id": "eq-005", "name": "Safety Shower", "category": "safety", "location": "Lab Area"}
-    ]
-    return equipment_list
-
-@router.get("/upcoming/maintenance")
-async def get_upcoming_maintenance(days: int = 7):
-    """Get upcoming maintenance within the next specified days"""
-    now = datetime.now()
-    future_date = now + timedelta(days=days)
-    
-    upcoming_maintenance = [
-        wo for wo in work_orders_db.values()
-        if wo["scheduled_date"] and 
-        now <= datetime.fromisoformat(wo["scheduled_date"]) <= future_date
-    ]
-    
-    return {
-        "count": len(upcoming_maintenance),
-        "upcoming_maintenance": sorted(upcoming_maintenance, key=lambda x: x["scheduled_date"])
-    }
+# Machine Maintenance History
+@router.get("/machines/{machine_id}/maintenance-history", tags=["Maintenance"])
+async def get_machine_maintenance_history(machine_id: int):  # CHANGED to int
+    try:
+        query = """
+            SELECT wo.*, jc.work_performed, jc.completed_at,
+                   emp.name as completed_by_name
+            FROM maintenance_work_orders wo
+            LEFT JOIN maintenance_job_cards jc ON wo.id = jc.work_order_id
+            LEFT JOIN employees emp ON jc.completed_by = emp.id
+            WHERE wo.machine_id = $1 AND wo.status = 'completed'
+            ORDER BY jc.completed_at DESC
+        """
+        history = await database.fetch_all(query, machine_id)
+        return {"data": history}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching maintenance history: {str(e)}")

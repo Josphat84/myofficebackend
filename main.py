@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import traceback
+from datetime import datetime
+import os  # Add this import
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -44,6 +46,7 @@ async def debug_overtime_direct():
 @app.get("/api/debug-overtime-router")
 async def debug_overtime_router():
     try:
+        # FIXED: Correct import path - app.routers (plural)
         from app.routers import overtime
         routes = []
         for route in overtime.router.routes:
@@ -64,6 +67,49 @@ async def debug_overtime_router():
             "traceback": traceback.format_exc()
         }
 
+# Debug: Check if maintenance router loads
+@app.get("/api/debug-maintenance-router")
+async def debug_maintenance_router():
+    try:
+        # FIXED: Correct import path - app.routers (plural)
+        from app.routers import maintenance
+        routes = []
+        for route in maintenance.router.routes:
+            if hasattr(route, 'methods') and hasattr(route, 'path'):
+                routes.append({
+                    'methods': list(route.methods),
+                    'path': route.path
+                })
+        return {
+            "status": "loaded",
+            "router_routes": routes,
+            "total_routes": len(routes)
+        }
+    except Exception as e:
+        return {
+            "status": "failed", 
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+# Debug: Check router files and loading status
+@app.get("/api/debug-router-files")
+async def debug_router_files():
+    try:
+        router_dir = "app/routers"
+        files = []
+        if os.path.exists(router_dir):
+            files = os.listdir(router_dir)
+        return {
+            "router_directory_exists": os.path.exists(router_dir),
+            "files": files,
+            "loaded_routers": list(loaded_routers.keys()),
+            "current_working_directory": os.getcwd(),
+            "python_path": os.environ.get('PYTHONPATH', 'Not set')
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 # Import and include routers with comprehensive error handling
 logger.info("🔄 Starting router imports...")
 
@@ -78,6 +124,7 @@ loaded_routers = {}
 
 for router_name in routers_to_import:
     try:
+        # FIXED: Correct import path - app.routers (plural)
         module = __import__(f"app.routers.{router_name}", fromlist=[router_name])
         router_obj = getattr(module, 'router')
         loaded_routers[router_name] = router_obj
@@ -95,7 +142,7 @@ try:
         ("reports", loaded_routers.get("reports"), "/api/reports"),
         ("maintenance", loaded_routers.get("maintenance"), "/api/maintenance"),
         ("inventory", loaded_routers.get("inventory"), "/api/inventory"),
-        ("overtime", loaded_routers.get("overtime"), "/api/overtime"),  # THIS IS CRITICAL
+        ("overtime", loaded_routers.get("overtime"), "/api/overtime"),
         ("standby", loaded_routers.get("standby"), "/api/standby"),
         ("ppe", loaded_routers.get("ppe"), "/api/ppe"),
         ("leave", loaded_routers.get("leave"), "/api/leave"),
@@ -107,6 +154,12 @@ try:
                 app.include_router(router, prefix=prefix, tags=[name.title()])
                 logger.info(f"✅ {name.title()} router included at {prefix}")
                 logger.info(f"   - Routes: {len(router.routes)}")
+                
+                # Log specific routes for maintenance
+                if name == "maintenance":
+                    for route in router.routes:
+                        if hasattr(route, 'methods') and hasattr(route, 'path'):
+                            logger.info(f"   - Maintenance route: {list(route.methods)} {prefix}{route.path}")
             except Exception as e:
                 logger.error(f"❌ Failed to include {name} router: {e}")
         else:
@@ -141,14 +194,33 @@ except Exception as e:
 async def startup_event():
     logger.info("🚀 Application starting up...")
     logger.info("📋 Registered routes:")
+    maintenance_routes = []
     overtime_routes = []
+    equipment_routes = []
+    employees_routes = []
+    
     for route in app.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
             methods = list(route.methods) if hasattr(route, 'methods') else []
             path_info = f"   {methods} {route.path}"
             logger.info(path_info)
+            
+            if '/api/maintenance' in str(route.path):
+                maintenance_routes.append(path_info)
             if '/api/overtime' in str(route.path):
                 overtime_routes.append(path_info)
+            if '/api/equipment' in str(route.path):
+                equipment_routes.append(path_info)
+            if '/api/employees' in str(route.path):
+                employees_routes.append(path_info)
+    
+    # Log route findings
+    if maintenance_routes:
+        logger.info("🔧 Maintenance routes found:")
+        for route in maintenance_routes:
+            logger.info(route)
+    else:
+        logger.error("❌ No maintenance routes found!")
     
     if overtime_routes:
         logger.info("🎯 Overtime routes found:")
@@ -156,6 +228,20 @@ async def startup_event():
             logger.info(route)
     else:
         logger.error("❌ No overtime routes found!")
+        
+    if equipment_routes:
+        logger.info("⚙️ Equipment routes found:")
+        for route in equipment_routes:
+            logger.info(route)
+    else:
+        logger.error("❌ No equipment routes found!")
+        
+    if employees_routes:
+        logger.info("👥 Employees routes found:")
+        for route in employees_routes:
+            logger.info(route)
+    else:
+        logger.error("❌ No employees routes found!")
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -184,6 +270,8 @@ async def root():
             "debug_test": "/api/debug-test",
             "debug_overtime": "/api/debug-overtime-direct",
             "debug_overtime_router": "/api/debug-overtime-router",
+            "debug_maintenance_router": "/api/debug-maintenance-router",
+            "debug_router_files": "/api/debug-router-files",
             "health": "/api/health",
             "docs": "/docs"
         }
@@ -192,16 +280,22 @@ async def root():
 @app.get("/api/health", tags=["Health"])
 async def health_check():
     logger.info("❤️ Health check called")
+    
+    # Check if key routers are loaded
+    router_status = {}
+    for router_name in ["maintenance", "overtime", "equipment", "employees"]:
+        router_status[router_name] = "operational" if loaded_routers.get(router_name) else "failed"
+    
     return {
         "status": "healthy",
         "message": "API is working with Supabase",
         "services": {
-            "equipment": "operational",
-            "employees": "operational",
+            "equipment": router_status.get("equipment", "unknown"),
+            "employees": router_status.get("employees", "unknown"),
             "reports": "operational",
-            "maintenance": "operational",
+            "maintenance": router_status.get("maintenance", "unknown"),
             "inventory": "operational",
-            "overtime": "operational",
+            "overtime": router_status.get("overtime", "unknown"),
             "standby": "operational",
             "ppe": "operational",
             "leave": "operational",
@@ -211,7 +305,8 @@ async def health_check():
             "noticeboard": "operational", 
             "training_certification": "operational",
             "operational_viz": "operational"
-        }
+        },
+        "loaded_routers": list(loaded_routers.keys())
     }
 
 # Vercel handler
