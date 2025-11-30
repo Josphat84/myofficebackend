@@ -1,434 +1,530 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import List, Optional
-from pydantic import BaseModel
-from datetime import date, datetime, timedelta
-import uuid
+# backend/app/routes/maintenance.py
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any
+from datetime import datetime, date
+from app.supabase_client import supabase
+import logging
+import json
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Pydantic Models (UPDATED - all IDs as int)
-class WorkOrderCreate(BaseModel):
-    machine_id: int
-    title: str
-    description: Optional[str] = None
-    priority: str = "medium"
-    assigned_to: Optional[int] = None  # CHANGED to Optional[int]
-    scheduled_date: Optional[date] = None
-    due_date: Optional[date] = None
-    estimated_hours: Optional[float] = None
-    tasks: Optional[List[str]] = None
+# ==================== WORK ORDERS MODELS ====================
+class JobType(BaseModel):
+    operational: bool = False
+    maintenance: bool = False
+    mining: bool = False
 
-class WorkOrderUpdate(BaseModel):
+class ManpowerRow(BaseModel):
+    grade: Optional[str] = None
+    required_number: Optional[str] = None  # Made optional
+    required_unit_time: Optional[str] = None  # Made optional
+    total_man_hours: Optional[str] = None  # Made optional
+
+class WorkOrderCreate(BaseModel):
+    # Header Information
+    to_department: str
+    to_section: str
+    date_raised: date
+    work_order_number: str
+    from_department: str
+    from_section: str
+    time_raised: str
+    account_number: str
+    equipment_info: str
+    user_lab_today: str
+    
+    # Job Type
+    job_type: JobType
+    job_request_details: str
+    requested_by: str
+    authorising_foreman: str
+    authorising_engineer: str
+    allocated_to: str
+    estimated_hours: str
+    responsible_foreman: str
+    job_instructions: str
+    
+    # Manpower - Made optional with default
+    manpower: Optional[List[ManpowerRow]] = None
+    
+    # Work Analysis
+    work_done_details: str
+    cause_of_failure: str
+    delay_details: str
+    
+    # Sign-off
+    artisan_name: str
+    artisan_sign: str
+    artisan_date: str
+    foreman_name: str
+    foreman_sign: str
+    foreman_date: str
+    
+    # Time Tracking
+    time_work_started: str
+    time_work_finished: str
+    total_time_worked: str
+    overtime_start_time: str
+    overtime_end_time: str
+    overtime_hours: str
+    delay_from_time: str
+    delay_to_time: str
+    total_delay_hours: str
+    
+    # Frontend compatibility fields
     title: Optional[str] = None
     description: Optional[str] = None
-    priority: Optional[str] = None
-    status: Optional[str] = None
-    assigned_to: Optional[int] = None  # CHANGED to Optional[int]
-    scheduled_date: Optional[date] = None
+    status: str = "pending"
+    priority: str = "medium"
+    department: Optional[str] = None
+    equipment: Optional[str] = None
     due_date: Optional[date] = None
-    actual_hours: Optional[float] = None
+    progress: int = 0
 
-class TaskUpdate(BaseModel):
-    completed: bool
-    notes: Optional[str] = None
-
-class JobCardCreate(BaseModel):
-    work_performed: str
-    parts_used: Optional[List[dict]] = None
-    labor_hours: float
-    technician_notes: Optional[str] = None
-    supervisor_notes: Optional[str] = None
-
-class RecurringMaintenanceCreate(BaseModel):
-    machine_id: int
-    title: str
+class WorkOrderUpdate(BaseModel):
+    to_department: Optional[str] = None
+    to_section: Optional[str] = None
+    date_raised: Optional[date] = None
+    work_order_number: Optional[str] = None
+    from_department: Optional[str] = None
+    from_section: Optional[str] = None
+    time_raised: Optional[str] = None
+    account_number: Optional[str] = None
+    equipment_info: Optional[str] = None
+    user_lab_today: Optional[str] = None
+    job_type: Optional[JobType] = None
+    job_request_details: Optional[str] = None
+    requested_by: Optional[str] = None
+    authorising_foreman: Optional[str] = None
+    authorising_engineer: Optional[str] = None
+    allocated_to: Optional[str] = None
+    estimated_hours: Optional[str] = None
+    responsible_foreman: Optional[str] = None
+    job_instructions: Optional[str] = None
+    manpower: Optional[List[ManpowerRow]] = None
+    work_done_details: Optional[str] = None
+    cause_of_failure: Optional[str] = None
+    delay_details: Optional[str] = None
+    artisan_name: Optional[str] = None
+    artisan_sign: Optional[str] = None
+    artisan_date: Optional[str] = None
+    foreman_name: Optional[str] = None
+    foreman_sign: Optional[str] = None
+    foreman_date: Optional[str] = None
+    time_work_started: Optional[str] = None
+    time_work_finished: Optional[str] = None
+    total_time_worked: Optional[str] = None
+    overtime_start_time: Optional[str] = None
+    overtime_end_time: Optional[str] = None
+    overtime_hours: Optional[str] = None
+    delay_from_time: Optional[str] = None
+    delay_to_time: Optional[str] = None
+    total_delay_hours: Optional[str] = None
+    title: Optional[str] = None
     description: Optional[str] = None
-    frequency_days: int
-    frequency_type: str = "days"
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    department: Optional[str] = None
+    equipment: Optional[str] = None
+    due_date: Optional[date] = None
+    progress: Optional[int] = None
 
-# Work Order Routes (UPDATED for integer IDs)
-@router.post("/work-orders", tags=["Maintenance"])
-async def create_work_order(work_order: WorkOrderCreate):
-    try:
-        work_order_number = f"WO-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
-        
-        # First, verify the machine exists
-        machine_check = """
-            SELECT id, name FROM equipment WHERE id = $1
-        """
-        machine = await database.fetch_one(machine_check, work_order.machine_id)
-        
-        if not machine:
-            raise HTTPException(status_code=404, detail="Machine not found")
-        
-        # Verify assigned employee exists if provided
-        if work_order.assigned_to:
-            employee_check = """
-                SELECT id, name FROM employees WHERE id = $1
-            """
-            employee = await database.fetch_one(employee_check, work_order.assigned_to)
-            if not employee:
-                raise HTTPException(status_code=404, detail="Assigned employee not found")
-        
-        # Insert work order
-        query = """
-            INSERT INTO maintenance_work_orders 
-            (work_order_number, machine_id, title, description, priority, assigned_to, 
-             scheduled_date, due_date, estimated_hours, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            RETURNING *
-        """
-        result = await database.fetch_one(query, 
-            work_order_number, work_order.machine_id, work_order.title, 
-            work_order.description, work_order.priority, work_order.assigned_to,
-            work_order.scheduled_date, work_order.due_date, work_order.estimated_hours,
-            1  # Replace with actual user ID from auth (integer)
-        )
-        
-        # Insert tasks if provided
-        if work_order.tasks:
-            for task_desc in work_order.tasks:
-                task_query = """
-                    INSERT INTO maintenance_tasks (work_order_id, task_description)
-                    VALUES ($1, $2)
-                """
-                await database.execute(task_query, result["id"], task_desc)
-        
-        return {
-            "message": "Work order created successfully", 
-            "data": result,
-            "machine_name": machine["name"]
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating work order: {str(e)}")
+# ==================== PPE MODELS (if not already separate) ====================
+class PPEIssueCreate(BaseModel):
+    employee_name: str = Field(..., min_length=1)
+    employee_id: str = Field(..., min_length=1)
+    department: str = Field(..., min_length=1)
+    position: str = Field(..., min_length=1)
+    ppe_type: str = Field(..., min_length=1)
+    item_name: str = Field(..., min_length=1)
+    size: Optional[str] = None
+    issue_date: date
+    expiry_date: Optional[date] = None
+    condition: str = Field(default="good")
+    status: str = Field(default="active")
+    notes: Optional[str] = None
+    issued_by: Optional[str] = None
+    location: Optional[str] = None
+    mine_section: Optional[str] = None
 
-@router.get("/work-orders", tags=["Maintenance"])
+class PPEIssueUpdate(BaseModel):
+    employee_name: Optional[str] = None
+    employee_id: Optional[str] = None
+    department: Optional[str] = None
+    position: Optional[str] = None
+    ppe_type: Optional[str] = None
+    item_name: Optional[str] = None
+    size: Optional[str] = None
+    issue_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    condition: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    issued_by: Optional[str] = None
+    location: Optional[str] = None
+    mine_section: Optional[str] = None
+
+# ==================== UTILITY FUNCTIONS ====================
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (date, datetime)):
+            return obj.isoformat()
+        return super().default(obj)
+
+def convert_dates_to_iso(record):
+    """Convert date objects to ISO format strings for JSON serialization"""
+    if isinstance(record, dict):
+        for key, value in record.items():
+            if isinstance(value, (date, datetime)):
+                record[key] = value.isoformat()
+    return record
+
+def prepare_data_for_db(data: dict) -> dict:
+    """Convert dates and complex objects to JSON-serializable formats"""
+    result = {}
+    for key, value in data.items():
+        if isinstance(value, (date, datetime)):
+            result[key] = value.isoformat()
+        elif isinstance(value, (dict, list)):
+            result[key] = json.dumps(value, cls=DateTimeEncoder)
+        else:
+            result[key] = value
+    return result
+
+def prepare_data_for_response(data: dict) -> dict:
+    """Convert JSON strings back to objects for API response"""
+    result = {}
+    json_fields = ['job_type', 'manpower']
+    
+    for key, value in data.items():
+        if key in json_fields and value and isinstance(value, str):
+            try:
+                result[key] = json.loads(value)
+            except json.JSONDecodeError:
+                result[key] = value
+        else:
+            result[key] = value
+    return result
+
+# ==================== WORK ORDERS ENDPOINTS ====================
+@router.get("/work-orders")
 async def get_work_orders(
-    status: Optional[str] = Query(None),
-    priority: Optional[str] = Query(None),
-    machine_id: Optional[int] = Query(None),
-    assigned_to: Optional[int] = Query(None),  # CHANGED to int
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100)
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    department: Optional[str] = None,
+    allocated_to: Optional[str] = None,
+    to_department: Optional[str] = None
 ):
     try:
-        base_query = """
-            SELECT wo.*, 
-                   e.name as machine_name, 
-                   e.serial_number,
-                   emp.name as assigned_to_name,
-                   creator.name as created_by_name
-            FROM maintenance_work_orders wo
-            LEFT JOIN equipment e ON wo.machine_id = e.id
-            LEFT JOIN employees emp ON wo.assigned_to = emp.id
-            LEFT JOIN employees creator ON wo.created_by = creator.id
-            WHERE 1=1
-        """
-        count_query = """
-            SELECT COUNT(*) 
-            FROM maintenance_work_orders wo
-            WHERE 1=1
-        """
+        query = supabase.table("work_orders").select("*")
         
-        params = []
-        param_count = 0
-        
-        if status:
-            param_count += 1
-            base_query += f" AND wo.status = ${param_count}"
-            count_query += f" AND wo.status = ${param_count}"
-            params.append(status)
-        
-        if priority:
-            param_count += 1
-            base_query += f" AND wo.priority = ${param_count}"
-            count_query += f" AND wo.priority = ${param_count}"
-            params.append(priority)
+        if status and status != 'all':
+            query = query.eq("status", status)
+        if priority and priority != 'all':
+            query = query.eq("priority", priority)
+        if department and department != 'all':
+            query = query.eq("department", department)
+        if allocated_to and allocated_to != 'all':
+            query = query.eq("allocated_to", allocated_to)
+        if to_department and to_department != 'all':
+            query = query.eq("to_department", to_department)
             
-        if machine_id:
-            param_count += 1
-            base_query += f" AND wo.machine_id = ${param_count}"
-            count_query += f" AND wo.machine_id = ${param_count}"
-            params.append(machine_id)
+        response = query.order("created_at", desc=True).execute()
+        
+        records = response.data or []
+        processed_records = []
+        for record in records:
+            processed_record = prepare_data_for_response(record)
+            processed_records.append(processed_record)
             
-        if assigned_to:
-            param_count += 1
-            base_query += f" AND wo.assigned_to = ${param_count}"
-            count_query += f" AND wo.assigned_to = ${param_count}"
-            params.append(assigned_to)
-        
-        # Add ordering and pagination
-        base_query += " ORDER BY wo.created_at DESC"
-        offset = (page - 1) * limit
-        base_query += f" LIMIT ${param_count + 1} OFFSET ${param_count + 2}"
-        params.extend([limit, offset])
-        
-        # Execute queries
-        work_orders = await database.fetch_all(base_query, *params)
-        total = await database.fetch_val(count_query, *params[:param_count])
-        
-        return {
-            "data": work_orders,
-            "pagination": {
-                "page": page,
-                "limit": limit,
-                "total": total,
-                "pages": (total + limit - 1) // limit
-            }
-        }
+        return processed_records
         
     except Exception as e:
+        logger.error(f"Error fetching work orders: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching work orders: {str(e)}")
 
-@router.get("/work-orders/{work_order_id}", tags=["Maintenance"])
-async def get_work_order_details(work_order_id: int):  # CHANGED to int
+@router.post("/work-orders")
+async def create_work_order(work_order: WorkOrderCreate):
     try:
-        # Get work order with details
-        wo_query = """
-            SELECT wo.*, 
-                   e.name as machine_name, e.serial_number, e.model,
-                   emp.name as assigned_to_name, emp.email as assigned_to_email,
-                   creator.name as created_by_name
-            FROM maintenance_work_orders wo
-            LEFT JOIN equipment e ON wo.machine_id = e.id
-            LEFT JOIN employees emp ON wo.assigned_to = emp.id
-            LEFT JOIN employees creator ON wo.created_by = creator.id
-            WHERE wo.id = $1
-        """
-        work_order = await database.fetch_one(wo_query, work_order_id)
+        data_to_insert = work_order.dict()
         
-        if not work_order:
+        # Set default title and description if not provided
+        if not data_to_insert.get('title'):
+            data_to_insert['title'] = data_to_insert['job_request_details'][:50] + '...' if len(data_to_insert['job_request_details']) > 50 else data_to_insert['job_request_details']
+        
+        if not data_to_insert.get('description'):
+            data_to_insert['description'] = data_to_insert['job_request_details']
+            
+        if not data_to_insert.get('department'):
+            data_to_insert['department'] = data_to_insert['to_department']
+            
+        if not data_to_insert.get('equipment'):
+            data_to_insert['equipment'] = data_to_insert['equipment_info']
+        
+        # Handle optional manpower - ensure it's not None
+        if data_to_insert.get('manpower') is None:
+            data_to_insert['manpower'] = []
+        
+        # Prepare data for database
+        data_to_insert = prepare_data_for_db(data_to_insert)
+        data_to_insert["created_at"] = datetime.utcnow().isoformat()
+        data_to_insert["updated_at"] = datetime.utcnow().isoformat()
+        
+        logger.info(f"Creating work order with data: {data_to_insert}")
+        
+        response = supabase.table("work_orders").insert(data_to_insert).execute()
+        
+        if response.data:
+            result = prepare_data_for_response(response.data[0])
+            return result
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create work order")
+            
+    except Exception as e:
+        logger.error(f"Error creating work order: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error creating work order: {str(e)}")
+
+@router.get("/work-orders/{work_order_id}")
+async def get_work_order(work_order_id: int):
+    try:
+        response = supabase.table("work_orders").select("*").eq("id", work_order_id).execute()
+        if not response.data:
             raise HTTPException(status_code=404, detail="Work order not found")
         
-        # Get tasks
-        tasks_query = """
-            SELECT t.*, emp.name as completed_by_name
-            FROM maintenance_tasks t
-            LEFT JOIN employees emp ON t.completed_by = emp.id
-            WHERE t.work_order_id = $1
-            ORDER BY t.created_at
-        """
-        tasks = await database.fetch_all(tasks_query, work_order_id)
-        
-        # Get job cards
-        job_cards_query = """
-            SELECT jc.*, emp.name as completed_by_name
-            FROM maintenance_job_cards jc
-            LEFT JOIN employees emp ON jc.completed_by = emp.id
-            WHERE jc.work_order_id = $1
-            ORDER BY jc.completed_at DESC
-        """
-        job_cards = await database.fetch_all(job_cards_query, work_order_id)
-        
-        return {
-            "work_order": work_order,
-            "tasks": tasks,
-            "job_cards": job_cards
-        }
+        result = prepare_data_for_response(response.data[0])
+        return result
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching work order details: {str(e)}")
+        logger.error(f"Error fetching work order: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching work order: {str(e)}")
 
-@router.put("/work-orders/{work_order_id}", tags=["Maintenance"])
-async def update_work_order(work_order_id: int, update_data: WorkOrderUpdate):  # CHANGED to int
+@router.patch("/work-orders/{work_order_id}")
+async def update_work_order(work_order_id: int, updated: WorkOrderUpdate):
     try:
-        # Verify assigned employee exists if provided
-        if update_data.assigned_to:
-            employee_check = """
-                SELECT id, name FROM employees WHERE id = $1
-            """
-            employee = await database.fetch_one(employee_check, update_data.assigned_to)
-            if not employee:
-                raise HTTPException(status_code=404, detail="Assigned employee not found")
+        existing = supabase.table("work_orders").select("*").eq("id", work_order_id).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Work order not found")
         
-        # Build dynamic update query
-        update_fields = []
-        params = []
-        param_count = 0
+        data_to_update = {k: v for k, v in updated.dict().items() if v is not None}
+        data_to_update = prepare_data_for_db(data_to_update)
+        data_to_update["updated_at"] = datetime.utcnow().isoformat()
         
-        for field, value in update_data.dict(exclude_unset=True).items():
-            param_count += 1
-            update_fields.append(f"{field} = ${param_count}")
-            params.append(value)
+        response = supabase.table("work_orders").update(data_to_update).eq("id", work_order_id).execute()
         
-        if not update_fields:
-            raise HTTPException(status_code=400, detail="No fields to update")
-        
-        param_count += 1
-        update_fields.append(f"updated_at = ${param_count}")
-        params.append(datetime.now())
-        
-        param_count += 1
-        params.append(work_order_id)
-        
-        query = f"""
-            UPDATE maintenance_work_orders 
-            SET {', '.join(update_fields)}
-            WHERE id = ${param_count}
-            RETURNING *
-        """
-        
-        result = await database.fetch_one(query, *params)
-        return {"message": "Work order updated successfully", "data": result}
-        
+        if response.data:
+            result = prepare_data_for_response(response.data[0])
+            return result
+        else:
+            raise HTTPException(status_code=500, detail="Update failed")
+            
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error updating work order: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error updating work order: {str(e)}")
 
-@router.post("/work-orders/{work_order_id}/complete", tags=["Maintenance"])
-async def complete_work_order(work_order_id: int, job_card: JobCardCreate):  # CHANGED to int
+@router.delete("/work-orders/{work_order_id}")
+async def delete_work_order(work_order_id: int):
     try:
-        async with database.transaction():
-            # Update work order status
-            update_wo_query = """
-                UPDATE maintenance_work_orders 
-                SET status = 'completed', completed_date = $1, actual_hours = $2
-                WHERE id = $3
-                RETURNING *
-            """
-            await database.execute(update_wo_query, datetime.now(), job_card.labor_hours, work_order_id)
-            
-            # Create job card
-            job_card_query = """
-                INSERT INTO maintenance_job_cards 
-                (work_order_id, work_performed, parts_used, labor_hours, 
-                 technician_notes, supervisor_notes, completed_by)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING *
-            """
-            result = await database.fetch_one(
-                job_card_query, work_order_id, job_card.work_performed,
-                job_card.parts_used, job_card.labor_hours, job_card.technician_notes,
-                job_card.supervisor_notes, 1  # Replace with actual user ID (integer)
-            )
-            
-            return {"message": "Work order completed successfully", "job_card": result}
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error completing work order: {str(e)}")
-
-# Bulk Job Card Generation
-@router.post("/work-orders/bulk-complete", tags=["Maintenance"])
-async def bulk_complete_work_orders(work_order_ids: List[int]):  # CHANGED to List[int]
-    try:
-        completed = []
-        for wo_id in work_order_ids:
-            # Update each work order to completed
-            query = """
-                UPDATE maintenance_work_orders 
-                SET status = 'completed', completed_date = $1
-                WHERE id = $2
-                RETURNING work_order_number
-            """
-            result = await database.fetch_one(query, datetime.now(), wo_id)
-            completed.append(result["work_order_number"])
+        existing = supabase.table("work_orders").select("*").eq("id", work_order_id).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Work order not found")
         
-        return {"message": f"Completed {len(completed)} work orders", "completed": completed}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error in bulk completion: {str(e)}")
-
-# Recurring Maintenance Routes
-@router.post("/recurring-maintenance", tags=["Maintenance"])
-async def create_recurring_maintenance(recurring: RecurringMaintenanceCreate):
-    try:
-        # Verify machine exists
-        machine_check = """
-            SELECT id, name FROM equipment WHERE id = $1
-        """
-        machine = await database.fetch_one(machine_check, recurring.machine_id)
-        
-        if not machine:
-            raise HTTPException(status_code=404, detail="Machine not found")
-        
-        query = """
-            INSERT INTO recurring_maintenance 
-            (machine_id, title, description, frequency_days, frequency_type)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING *
-        """
-        result = await database.fetch_one(query, 
-            recurring.machine_id, recurring.title, recurring.description,
-            recurring.frequency_days, recurring.frequency_type
-        )
-        
-        return {
-            "message": "Recurring maintenance created", 
-            "data": result,
-            "machine_name": machine["name"]
-        }
+        supabase.table("work_orders").delete().eq("id", work_order_id).execute()
+        return {"success": True, "message": "Work order deleted successfully"}
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating recurring maintenance: {str(e)}")
+        logger.error(f"Error deleting work order: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting work order: {str(e)}")
 
-@router.post("/recurring-maintenance/generate-work-orders", tags=["Maintenance"])
-async def generate_recurring_work_orders():
+@router.get("/work-orders/allocated/{allocated_to}")
+async def get_work_orders_by_allocated(allocated_to: str):
     try:
-        # Find recurring maintenance that's due
-        query = """
-            SELECT rm.*, e.name as machine_name
-            FROM recurring_maintenance rm
-            JOIN equipment e ON rm.machine_id = e.id
-            WHERE rm.is_active = true 
-            AND (rm.next_due_date IS NULL OR rm.next_due_date <= CURRENT_DATE)
-        """
-        due_maintenance = await database.fetch_all(query)
+        response = supabase.table("work_orders").select("*").eq("allocated_to", allocated_to).order("created_at", desc=True).execute()
         
-        generated = []
-        for maintenance in due_maintenance:
-            # Create work order
-            wo_number = f"WO-RECUR-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+        records = response.data or []
+        processed_records = []
+        for record in records:
+            processed_record = prepare_data_for_response(record)
+            processed_records.append(processed_record)
             
-            wo_query = """
-                INSERT INTO maintenance_work_orders 
-                (work_order_number, machine_id, title, description, priority, scheduled_date)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING *
-            """
-            work_order = await database.fetch_one(wo_query,
-                wo_number, maintenance["machine_id"], maintenance["title"],
-                maintenance["description"], "medium", date.today()
-            )
-            
-            # Update next due date
-            next_due = date.today() + timedelta(days=maintenance["frequency_days"])
-            update_recur_query = """
-                UPDATE recurring_maintenance 
-                SET last_performed = $1, next_due_date = $2
-                WHERE id = $3
-            """
-            await database.execute(update_recur_query, date.today(), next_due, maintenance["id"])
-            
-            generated.append(work_order["work_order_number"])
-        
-        return {"message": f"Generated {len(generated)} work orders", "work_orders": generated}
+        return processed_records
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating work orders: {str(e)}")
+        logger.error(f"Error fetching work orders by allocated: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching work orders by allocated: {str(e)}")
 
-# Machine Maintenance History
-@router.get("/machines/{machine_id}/maintenance-history", tags=["Maintenance"])
-async def get_machine_maintenance_history(machine_id: int):  # CHANGED to int
+# ==================== WORK ORDERS STATISTICS ====================
+@router.get("/work-orders/stats/summary")
+async def get_work_order_stats():
     try:
-        query = """
-            SELECT wo.*, jc.work_performed, jc.completed_at,
-                   emp.name as completed_by_name
-            FROM maintenance_work_orders wo
-            LEFT JOIN maintenance_job_cards jc ON wo.id = jc.work_order_id
-            LEFT JOIN employees emp ON jc.completed_by = emp.id
-            WHERE wo.machine_id = $1 AND wo.status = 'completed'
-            ORDER BY jc.completed_at DESC
-        """
-        history = await database.fetch_all(query, machine_id)
-        return {"data": history}
+        # Get total records count
+        records_response = supabase.table("work_orders").select("id", count="exact").execute()
+        total_records = len(records_response.data) if records_response.data else 0
+        
+        # Get records by status
+        status_response = supabase.table("work_orders").select("status").execute()
+        status_counts = {}
+        if status_response.data:
+            for record in status_response.data:
+                status = record.get('status', 'unknown')
+                status_counts[status] = status_counts.get(status, 0) + 1
+        
+        # Get records by priority
+        priority_response = supabase.table("work_orders").select("priority").execute()
+        priority_counts = {}
+        if priority_response.data:
+            for record in priority_response.data:
+                priority = record.get('priority', 'unknown')
+                priority_counts[priority] = priority_counts.get(priority, 0) + 1
+        
+        # Count overdue work orders
+        today = date.today()
+        records_all = supabase.table("work_orders").select("due_date, status").execute()
+        overdue_count = 0
+        
+        if records_all.data:
+            for record in records_all.data:
+                due_date_str = record.get('due_date')
+                status = record.get('status', 'pending')
+                
+                if due_date_str and status != 'completed':
+                    try:
+                        due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
+                        if due_date < today:
+                            overdue_count += 1
+                    except (ValueError, TypeError):
+                        continue
+        
+        # Calculate average progress
+        progress_response = supabase.table("work_orders").select("progress").execute()
+        total_progress = 0
+        count_with_progress = 0
+        
+        if progress_response.data:
+            for record in progress_response.data:
+                progress = record.get('progress', 0)
+                if progress is not None:
+                    total_progress += progress
+                    count_with_progress += 1
+        
+        avg_progress = round(total_progress / count_with_progress) if count_with_progress > 0 else 0
+        
+        return {
+            "total_records": total_records,
+            "status_breakdown": status_counts,
+            "priority_breakdown": priority_counts,
+            "overdue_count": overdue_count,
+            "average_progress": avg_progress,
+            "pending": status_counts.get('pending', 0),
+            "in_progress": status_counts.get('in-progress', 0),
+            "completed": status_counts.get('completed', 0),
+            "on_hold": status_counts.get('on-hold', 0),
+            "urgent": priority_counts.get('urgent', 0),
+            "high": priority_counts.get('high', 0),
+            "medium": priority_counts.get('medium', 0),
+            "low": priority_counts.get('low', 0)
+        }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching maintenance history: {str(e)}")
+        logger.error(f"Error fetching work order stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching work order stats: {str(e)}")
+
+# ==================== PPE ENDPOINTS (if you want them consolidated here) ====================
+@router.get("/ppe")
+async def get_ppe_records(
+    status: Optional[str] = None,
+    ppe_type: Optional[str] = None,
+    department: Optional[str] = None,
+    location: Optional[str] = None,
+    employee_id: Optional[str] = None
+):
+    try:
+        query = supabase.table("ppe_records").select("*")
+        
+        if status and status != 'all':
+            query = query.eq("status", status)
+        if ppe_type and ppe_type != 'all':
+            query = query.eq("ppe_type", ppe_type)
+        if department and department != 'all':
+            query = query.eq("department", department)
+        if location and location != 'all':
+            query = query.eq("location", location)
+        if employee_id and employee_id != 'all':
+            query = query.eq("employee_id", employee_id)
+            
+        response = query.order("created_at", desc=True).execute()
+        
+        records = response.data or []
+        for record in records:
+            convert_dates_to_iso(record)
+            
+        return records
+        
+    except Exception as e:
+        logger.error(f"Error fetching PPE records: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching PPE records: {str(e)}")
+
+@router.post("/ppe")
+async def create_ppe_record(record: PPEIssueCreate):
+    try:
+        data_to_insert = record.dict()
+        
+        if data_to_insert.get('issue_date'):
+            data_to_insert['issue_date'] = data_to_insert['issue_date'].isoformat()
+        if data_to_insert.get('expiry_date'):
+            data_to_insert['expiry_date'] = data_to_insert['expiry_date'].isoformat()
+            
+        data_to_insert["created_at"] = datetime.utcnow().isoformat()
+        
+        response = supabase.table("ppe_records").insert(data_to_insert).execute()
+        
+        if response.data:
+            result = response.data[0]
+            convert_dates_to_iso(result)
+            return result
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create PPE record")
+            
+    except Exception as e:
+        logger.error(f"Error creating PPE record: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error creating PPE record: {str(e)}")
+
+# ==================== MAINTENANCE DASHBOARD STATS ====================
+@router.get("/dashboard/stats")
+async def get_maintenance_dashboard_stats():
+    """Combined stats for maintenance dashboard"""
+    try:
+        # Get work order stats
+        work_order_stats = await get_work_order_stats()
+        
+        # Get PPE stats (you can add PPE stats here too)
+        ppe_response = supabase.table("ppe_records").select("id", count="exact").execute()
+        total_ppe = len(ppe_response.data) if ppe_response.data else 0
+        
+        # Calculate overall efficiency
+        total_work_orders = work_order_stats["total_records"]
+        completed_work_orders = work_order_stats["completed"]
+        efficiency = round((completed_work_orders / total_work_orders * 100)) if total_work_orders > 0 else 0
+        
+        return {
+            "work_orders": work_order_stats,
+            "ppe_count": total_ppe,
+            "overall_efficiency": efficiency,
+            "total_maintenance_items": total_work_orders + total_ppe
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching dashboard stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching dashboard stats: {str(e)}")
+
+# Health check endpoint
+@router.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "maintenance"}

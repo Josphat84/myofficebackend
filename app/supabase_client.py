@@ -1,16 +1,13 @@
-# Supabase client
-## This module initializes and provides access to the Supabase client
-## File: backend/app/supabase_client.py
-
+# app/
 
 from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env
+#Load environment variables from .env file
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # Use service_role key for backend
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")   #Use service role key for backend operations
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
