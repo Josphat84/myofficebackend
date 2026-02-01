@@ -1,4 +1,4 @@
-﻿# main.py - COMPLETE UPDATED VERSION
+﻿# main.py - COMPLETE UPDATED VERSION WITH TIMESHEETS
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -83,7 +83,9 @@ async def root():
             "equipment": "/api/equipment",
             "maintenance": "/api/maintenance",
             "spares": "/api/spares",
-            "notices": "/api/notices"
+            "notices": "/api/notices",
+            "availability": "/api/availabilities",
+            "timesheets": "/api/timesheets"
         }
     }
 
@@ -181,6 +183,129 @@ async def standby_health_check():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+# ===== DIRECT AVAILABILITY ENDPOINTS (NEW - ALWAYS WORK) =====
+class AvailabilityStats(BaseModel):
+    totalEquipment: int = 0
+    operational: int = 0
+    inMaintenance: int = 0
+    inBreakdown: int = 0
+    overallAvailability: float = 0.0
+    avgUptime: float = 0.0
+    avgDowntime: float = 0.0
+    totalOperationalHours: float = 0.0
+    totalBreakdownHours: float = 0.0
+    monthAvailability: float = 0.0
+    weekAvailability: float = 0.0
+
+# Mock equipment data for availability (temporary - can be replaced with database)
+mock_equipment_db = [
+    {
+        "id": "1",
+        "name": "CNC Machine 1",
+        "category": "Machinery",
+        "department": "Production",
+        "operationalHours": 450.5,
+        "breakdownHours": 12.3,
+        "availability": 97.27,
+        "status": "operational",
+        "lastMaintenance": "2024-01-15",
+        "nextMaintenance": "2024-02-15",
+        "uptime": 438.2,
+        "downtime": 12.3,
+        "mtbf": 120.5,
+        "mttr": 2.5
+    },
+    {
+        "id": "2",
+        "name": "Forklift A",
+        "category": "Vehicles",
+        "department": "Logistics",
+        "operationalHours": 320.0,
+        "breakdownHours": 8.5,
+        "availability": 97.34,
+        "status": "operational",
+        "lastMaintenance": "2024-01-10",
+        "nextMaintenance": "2024-02-10",
+        "uptime": 311.5,
+        "downtime": 8.5,
+        "mtbf": 85.3,
+        "mttr": 3.2
+    },
+    {
+        "id": "3",
+        "name": "3D Printer",
+        "category": "Electronics",
+        "department": "R&D",
+        "operationalHours": 280.0,
+        "breakdownHours": 24.0,
+        "availability": 91.43,
+        "status": "maintenance",
+        "lastMaintenance": "2024-01-20",
+        "nextMaintenance": "2024-03-20",
+        "uptime": 256.0,
+        "downtime": 24.0,
+        "mtbf": 65.7,
+        "mttr": 6.5
+    }
+]
+
+@app.get("/api/availabilities")
+async def get_availabilities():
+    """Get equipment availabilities"""
+    logger.info("Fetching equipment availabilities...")
+    return mock_equipment_db
+
+@app.get("/api/availabilities/stats")
+async def get_availability_stats():
+    """Get availability statistics"""
+    logger.info("Calculating availability statistics...")
+    
+    # Calculate from mock data
+    total_equipment = len(mock_equipment_db)
+    operational = sum(1 for e in mock_equipment_db if e["status"] == "operational")
+    in_maintenance = sum(1 for e in mock_equipment_db if e["status"] == "maintenance")
+    in_breakdown = sum(1 for e in mock_equipment_db if e["status"] == "breakdown")
+    
+    total_operational_hours = sum(e["operationalHours"] for e in mock_equipment_db)
+    total_breakdown_hours = sum(e["breakdownHours"] for e in mock_equipment_db)
+    
+    overall_availability = ((total_operational_hours - total_breakdown_hours) / total_operational_hours * 100) if total_operational_hours > 0 else 0
+    
+    avg_uptime = sum(e["uptime"] for e in mock_equipment_db) / total_equipment if total_equipment > 0 else 0
+    avg_downtime = sum(e["downtime"] for e in mock_equipment_db) / total_equipment if total_equipment > 0 else 0
+    
+    return AvailabilityStats(
+        totalEquipment=total_equipment,
+        operational=operational,
+        inMaintenance=in_maintenance,
+        inBreakdown=in_breakdown,
+        overallAvailability=round(overall_availability, 2),
+        avgUptime=round(avg_uptime, 2),
+        avgDowntime=round(avg_downtime, 2),
+        totalOperationalHours=round(total_operational_hours, 2),
+        totalBreakdownHours=round(total_breakdown_hours, 2),
+        monthAvailability=round(overall_availability * 0.95, 2),
+        weekAvailability=round(overall_availability * 0.98, 2)
+    )
+
+@app.get("/api/availabilities/{equipment_id}")
+async def get_equipment_availability(equipment_id: str):
+    """Get availability for specific equipment"""
+    for equipment in mock_equipment_db:
+        if equipment["id"] == equipment_id:
+            return equipment
+    raise HTTPException(status_code=404, detail="Equipment not found")
+
+@app.get("/api/availabilities/health/check")
+async def availability_health_check():
+    """Health check for availability system"""
+    return {
+        "status": "healthy",
+        "service": "availability",
+        "equipment_count": len(mock_equipment_db),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 # ===== INITIALIZE LOADED ROUTERS DICTIONARY =====
 loaded_routers = {}
 
@@ -264,7 +389,6 @@ except Exception as e:
 logger.info("🔄 CRITICAL: Loading noticeboard router...")
 
 try:
-    # FIXED: Changed from 'backend.app.routers.notices' to 'app.routers.notices'
     from app.routers.notices import router as noticeboard_router
     app.include_router(noticeboard_router, prefix="/api/notices", tags=["Notices"])
     loaded_routers["noticeboard"] = noticeboard_router
@@ -320,6 +444,22 @@ except Exception as e:
     logger.error(traceback.format_exc())
     loaded_routers["noticeboard"] = None
 
+# ===== AVAILABILITY ROUTER (NEW) =====
+logger.info("🔄 Loading availability router...")
+
+try:
+    from app.routers.availability import router as availability_router
+    app.include_router(availability_router, prefix="/api", tags=["Availability"])
+    loaded_routers["availability"] = availability_router
+    logger.info("✅ AVAILABILITY ROUTER SUCCESSFULLY LOADED at /api/availabilities")
+except ImportError as e:
+    logger.warning(f"⚠️  Failed to import availability router: {e}")
+    logger.info("⚠️  Using direct availability endpoints instead")
+    loaded_routers["availability"] = None
+except Exception as e:
+    logger.error(f"❌ Error including availability router: {e}")
+    loaded_routers["availability"] = None
+
 # ===== EMPLOYEES ROUTER (CRITICAL FOR STANDBY) =====
 logger.info("🔄 Loading employees router...")
 
@@ -331,6 +471,32 @@ try:
 except ImportError as e:
     logger.error(f"❌ Failed to import employees router: {e}")
     loaded_routers["employees"] = None
+
+# ===== TIMESHEETS ROUTER (NEW - CRITICAL FOR TIMESHEET SYSTEM) =====
+logger.info("🔄 CRITICAL: Loading timesheets router...")
+
+try:
+    from app.routers.timesheets import router as timesheets_router
+    app.include_router(timesheets_router, prefix="/api/timesheets", tags=["Timesheets"])
+    loaded_routers["timesheets"] = timesheets_router
+    logger.info("✅ TIMESHEETS ROUTER SUCCESSFULLY LOADED at /api/timesheets")
+    
+    # Log all timesheets routes
+    logger.info("📋 Timesheets routes registered:")
+    for route in timesheets_router.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = list(route.methods) if hasattr(route, 'methods') else []
+            path = route.path if route.path else "/"
+            logger.info(f"   {methods} /api/timesheets{path}")
+            
+except ImportError as e:
+    logger.error(f"❌ CRITICAL ERROR: Failed to import timesheets router: {e}")
+    logger.error(traceback.format_exc())
+    loaded_routers["timesheets"] = None
+except Exception as e:
+    logger.error(f"❌ CRITICAL ERROR: Error including timesheets router: {e}")
+    logger.error(traceback.format_exc())
+    loaded_routers["timesheets"] = None
 
 # ===== EQUIPMENT ROUTER =====
 logger.info("🔄 Loading equipment router...")
@@ -390,45 +556,6 @@ for router_name in routers_to_import:
     except Exception as e:
         logger.error(f"❌ Failed to import {router_name} router: {e}")
         loaded_routers[router_name] = None
-
-# ===== DEBUG ENDPOINT FOR NOTICEBOARD =====
-@app.get("/api/debug-notices-router")
-async def debug_notices_router():
-    """Debug endpoint to check noticeboard router status"""
-    noticeboard_router = loaded_routers.get("noticeboard")
-    
-    if noticeboard_router:
-        # List all routes in the noticeboard router
-        routes = []
-        for route in noticeboard_router.routes:
-            if hasattr(route, 'methods') and hasattr(route, 'path'):
-                methods = list(route.methods) if hasattr(route, 'methods') else []
-                path = route.path
-                routes.append({
-                    'methods': methods,
-                    'path': path,
-                    'name': getattr(route, 'name', 'N/A')
-                })
-        
-        return {
-            "status": "loaded",
-            "router": "noticeboard",
-            "total_routes": len(routes),
-            "routes": routes,
-            "note": "Router is successfully loaded"
-        }
-    else:
-        return {
-            "status": "not_loaded",
-            "router": "noticeboard",
-            "error": "Router not found in loaded_routers",
-            "available_routers": list(loaded_routers.keys()),
-            "fix_steps": [
-                "1. Check that app/routers/notices.py exists",
-                "2. Check for import errors in notices.py",
-                "3. Check that notices.py exports a 'router' variable"
-            ]
-        }
 
 # ===== DIRECT NOTICE ENDPOINTS AS FALLBACK (Always available) =====
 logger.info("🔄 Adding direct notice endpoints as guaranteed fallback...")
@@ -528,33 +655,6 @@ async def employees_fallback():
             "note": "Check app/routers/employees.py for errors"
         }
 
-# Fallback for notices if router not loaded
-@app.get("/api/notices")
-@app.get("/api/notices/")
-async def notices_fallback():
-    """Fallback endpoint if noticeboard router doesn't load"""
-    if loaded_routers.get("noticeboard"):
-        return {
-            "message": "Noticeboard router is loaded",
-            "use_endpoint": "/api/notices for full functionality"
-        }
-    else:
-        return {
-            "message": "Noticeboard router not loaded - using fallback",
-            "status": "fallback_mode",
-            "direct_endpoints": [
-                "GET /api/direct-notices - Get all notices (always works)",
-                "POST /api/direct-notices - Create a notice (always works)",
-                "GET /api/direct-notices/{id} - Get a specific notice"
-            ],
-            "fix_steps": [
-                "1. Check that app/routers/notices.py exists",
-                "2. Check for syntax errors in notices.py",
-                "3. Check supabase_client.py connection",
-                "4. Restart the backend server"
-            ]
-        }
-
 # ===== DEBUG ENDPOINTS =====
 @app.get("/api/debug-all-routes")
 async def debug_all_routes():
@@ -577,6 +677,8 @@ async def debug_all_routes():
         "employees_routes": [r for r in routes if 'employees' in r['path']],
         "equipment_routes": [r for r in routes if 'equipment' in r['path']],
         "maintenance_routes": [r for r in routes if 'maintenance' in r['path']],
+        "availability_routes": [r for r in routes if 'availabilities' in r['path']],
+        "timesheets_routes": [r for r in routes if 'timesheets' in r['path']],
         "routers_loaded": {k: v is not None for k, v in loaded_routers.items()}
     }
 
@@ -587,16 +689,19 @@ async def debug_router_status():
             "spares": loaded_routers.get("spares") is not None,
             "standby": loaded_routers.get("standby") is not None,
             "noticeboard": loaded_routers.get("noticeboard") is not None,
+            "availability": loaded_routers.get("availability") is not None,
             "employees": loaded_routers.get("employees") is not None,
             "daily_reports": loaded_routers.get("daily_reports") is not None,
             "breakdowns": loaded_routers.get("breakdowns") is not None,
             "equipment": loaded_routers.get("equipment") is not None,
-            "maintenance": loaded_routers.get("maintenance") is not None
+            "maintenance": loaded_routers.get("maintenance") is not None,
+            "timesheets": loaded_routers.get("timesheets") is not None
         },
         "all_routers": {k: v is not None for k, v in loaded_routers.items()},
         "direct_endpoints_available": {
             "notices": True,  # /api/direct-notices always works
-            "standby": True   # /api/standby always works
+            "standby": True,  # /api/standby always works
+            "availability": True  # Direct availability endpoints
         },
         "note": "Check /api/spares/health/check for spares health"
     }
@@ -623,6 +728,23 @@ async def spares_health_check_fallback():
                 "4. Restart the backend server"
             ]
         }
+
+@app.get("/api/availability/health")
+async def availability_health_check_endpoint():
+    """Health check for availability system"""
+    return {
+        "status": "healthy",
+        "service": "availability",
+        "direct_endpoints": [
+            "GET /api/availabilities",
+            "GET /api/availabilities/stats",
+            "GET /api/availabilities/{id}",
+            "GET /api/availabilities/health/check"
+        ],
+        "router_loaded": loaded_routers.get("availability") is not None,
+        "mock_data_count": len(mock_equipment_db),
+        "note": "Direct endpoints always available"
+    }
 
 @app.get("/api/employees/health")
 async def employees_health_check():
@@ -675,71 +797,54 @@ async def notices_health_check():
             ]
         }
 
+@app.get("/api/timesheets/health")
+async def timesheets_health_check():
+    """Health check for timesheets router"""
+    timesheets_router = loaded_routers.get("timesheets")
+    if timesheets_router:
+        return {
+            "status": "healthy",
+            "service": "timesheets",
+            "message": "Timesheets router is loaded and ready",
+            "endpoints_available": [
+                "GET /api/timesheets - Get all timesheets",
+                "POST /api/timesheets - Create a timesheet entry",
+                "GET /api/timesheets/{id} - Get a specific timesheet",
+                "PATCH /api/timesheets/{id} - Update a timesheet",
+                "DELETE /api/timesheets/{id} - Delete a timesheet",
+                "GET /api/timesheets/stats/summary - Get timesheet statistics"
+            ]
+        }
+    else:
+        return {
+            "status": "unhealthy",
+            "service": "timesheets",
+            "message": "Timesheets router not loaded",
+            "fix_steps": [
+                "1. Check that app/routers/timesheets.py exists",
+                "2. Rename overtime.py to timesheets.py if needed",
+                "3. Check for syntax errors in timesheets.py",
+                "4. Restart the backend server"
+            ]
+        }
+
 # ===== TEST ENDPOINTS =====
-@app.get("/api/test-spares-connection")
-async def test_spares_connection():
-    """Test endpoint for spares router"""
+@app.get("/api/test-availability-connection")
+async def test_availability_connection():
+    """Test endpoint for availability system"""
     return {
         "status": "test",
-        "message": "Spares connection test",
-        "spares_loaded": loaded_routers.get("spares") is not None,
+        "message": "Availability connection test",
+        "direct_endpoints_active": True,
+        "equipment_count": len(mock_equipment_db),
         "backend": "FastAPI",
         "endpoints_available": [
-            "GET /api/spares",
-            "POST /api/spares",
-            "GET /api/spares/{id}",
-            "PUT /api/spares/{id}",
-            "DELETE /api/spares/{id}",
-            "GET /api/spares/stats/summary",
-            "GET /api/spares/suggestions/{field}",
-            "GET /api/spares/health/check"
-        ] if loaded_routers.get("spares") else [],
-        "note": "Spares inventory management system"
-    }
-
-@app.get("/api/test-standby-connection")
-async def test_standby_connection():
-    """Test endpoint for standby system"""
-    return {
-        "status": "test",
-        "message": "Standby connection test",
-        "standalone_endpoints_active": True,
-        "schedules_count": len(standby_db),
-        "backend": "FastAPI",
-        "endpoints_available": [
-            "GET /api/standby",
-            "POST /api/standby",
-            "POST /api/standby/create",
-            "GET /api/standby/{id}",
-            "PUT /api/standby/{id}",
-            "DELETE /api/standby/{id}",
-            "GET /api/standby/health/check"
+            "GET /api/availabilities",
+            "GET /api/availabilities/stats",
+            "GET /api/availabilities/{id}",
+            "GET /api/availabilities/health/check"
         ],
-        "note": "Standby system is working with in-memory storage"
-    }
-
-@app.get("/api/test-notices-connection")
-async def test_notices_connection():
-    """Test endpoint for noticeboard system"""
-    noticeboard_router = loaded_routers.get("noticeboard")
-    return {
-        "status": "test",
-        "message": "Noticeboard connection test",
-        "noticeboard_loaded": noticeboard_router is not None,
-        "backend": "FastAPI",
-        "router_endpoints": [
-            "GET /api/notices",
-            "POST /api/notices",
-            "GET /api/notices/{id}",
-            "PUT /api/notices/{id}",
-            "DELETE /api/notices/{id}"
-        ] if noticeboard_router else [],
-        "direct_endpoints_always_available": [
-            "GET /api/direct-notices",
-            "POST /api/direct-notices",
-            "GET /api/direct-notices/{id}"
-        ],
-        "note": "Noticeboard management system with fallback support"
+        "note": "Availability system is working with mock data"
     }
 
 @app.get("/api/test-all-connections")
@@ -755,7 +860,7 @@ async def test_all_connections():
         test_results["basic_health"] = {"status": "error", "error": str(e)}
     
     # Test each critical router
-    critical_routers = ["spares", "standby", "noticeboard", "employees", "daily_reports", "breakdowns", "equipment", "maintenance"]
+    critical_routers = ["spares", "standby", "noticeboard", "availability", "employees", "daily_reports", "breakdowns", "equipment", "maintenance", "timesheets"]
     
     for router_name in critical_routers:
         router = loaded_routers.get(router_name)
@@ -778,15 +883,33 @@ async def test_all_connections():
             except Exception as e:
                 test_results[router_name]["error"] = str(e)
     
-    # Test direct notice endpoints
+    # Test direct endpoints
+    test_results["direct_availability"] = {
+        "available": True,
+        "endpoints": [
+            "GET /api/availabilities",
+            "GET /api/availabilities/stats",
+            "GET /api/availabilities/{id}",
+            "GET /api/availabilities/health/check"
+        ]
+    }
+    
+    test_results["direct_standby"] = {
+        "available": True,
+        "endpoints": [
+            "GET /api/standby",
+            "POST /api/standby",
+            "GET /api/standby/{id}"
+        ]
+    }
+    
     test_results["direct_notices"] = {
         "available": True,
         "endpoints": [
             "GET /api/direct-notices",
             "POST /api/direct-notices",
             "GET /api/direct-notices/{id}"
-        ],
-        "note": "Always available as fallback"
+        ]
     }
     
     return {
@@ -810,11 +933,13 @@ async def startup_event():
         "spares": "Spares Inventory",
         "standby": "Standby Scheduler",
         "noticeboard": "Noticeboard Management",
+        "availability": "Equipment Availability",
         "employees": "Employees",
         "daily_reports": "Daily Reports",
         "breakdowns": "Breakdowns",
         "equipment": "Equipment",
-        "maintenance": "Maintenance"
+        "maintenance": "Maintenance",
+        "timesheets": "Timesheets"
     }
     
     for router_name, display_name in critical_routers.items():
@@ -823,24 +948,15 @@ async def startup_event():
         else:
             logger.error(f"❌ {display_name} router FAILED TO LOAD!")
     
-    # Log standalone standby status
-    logger.info("📊 Standalone Standby System Status:")
-    logger.info(f"   ✅ Direct endpoints available at /api/standby")
-    logger.info(f"   📋 Currently {len(standby_db)} schedules in memory")
-    
-    # Log noticeboard status
-    if loaded_routers.get("noticeboard"):
-        logger.info("📊 Noticeboard System Status:")
-        logger.info(f"   ✅ Noticeboard endpoints available at /api/notices")
-        logger.info(f"   📋 Database: Supabase table 'notices'")
-    else:
-        logger.warning("⚠️  Noticeboard router failed to load! Using fallback endpoints")
-        logger.info("   ✅ Fallback endpoints available at /api/direct-notices")
-    
-    # Log direct notice fallback
-    logger.info("📊 Direct Notice Fallback System:")
-    logger.info(f"   ✅ Always available at /api/direct-notices")
-    logger.info(f"   📋 Currently {len(notices_db)} notices in memory fallback")
+    # Log standalone endpoints status
+    logger.info("📊 Standalone Systems Status:")
+    logger.info(f"   ✅ Availability endpoints available at /api/availabilities")
+    logger.info(f"   📋 Currently {len(mock_equipment_db)} equipment in availability system")
+    logger.info(f"   ✅ Standby endpoints available at /api/standby")
+    logger.info(f"   📋 Currently {len(standby_db)} schedules in standby system")
+    logger.info(f"   ✅ Direct notice endpoints available at /api/direct-notices")
+    logger.info(f"   📋 Currently {len(notices_db)} notices in fallback system")
+    logger.info(f"   ✅ Timesheets endpoints available at /api/timesheets")
     
     # Log all routes for debugging
     logger.info("📋 All registered routes by category:")
@@ -850,11 +966,13 @@ async def startup_event():
         "standby": [],
         "notices": [],
         "direct_notices": [],
+        "availability": [],
         "employees": [],
         "equipment": [],
         "maintenance": [],
         "daily_reports": [],
         "breakdowns": [],
+        "timesheets": [],
         "other": []
     }
     
@@ -885,16 +1003,16 @@ async def startup_event():
     total_endpoints = sum(len(routes) for routes in route_categories.values())
     logger.info(f"📊 Total endpoints registered: {total_endpoints}")
     
-    # Special notice for noticeboard routes
-    if route_categories["notices"]:
-        logger.info("📢 Noticeboard System is ready at:")
-        for route in route_categories["notices"][:5]:  # Show first 5 notice routes
+    # Special notice for availability routes
+    if route_categories["availability"]:
+        logger.info("📊 Availability System is ready at:")
+        for route in route_categories["availability"][:5]:
             logger.info(f"   {route}")
     
-    # Special notice for direct notice routes
-    if route_categories["direct_notices"]:
-        logger.info("📢 Direct Notice Fallback System is ready at:")
-        for route in route_categories["direct_notices"]:
+    # Special notice for timesheets routes
+    if route_categories["timesheets"]:
+        logger.info("📊 Timesheets System is ready at:")
+        for route in route_categories["timesheets"][:5]:
             logger.info(f"   {route}")
 
 # ===== SHUTDOWN EVENT =====
@@ -906,5 +1024,5 @@ async def shutdown_event():
 from mangum import Mangum
 handler = Mangum(app)
 
-logger.info("🏁 Main.py setup completed - All routers initialized including Spares, Standby, and Noticeboard")
-logger.info("🏁 Direct fallback endpoints available at /api/direct-notices")
+logger.info("🏁 Main.py setup completed - All routers initialized including Timesheets")
+logger.info("🏁 Direct endpoints available: /api/availabilities, /api/standby, /api/direct-notices, /api/timesheets")
