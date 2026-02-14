@@ -1,13 +1,18 @@
-﻿# main.py - COMPLETE UPDATED VERSION WITH TIMESHEETS
+﻿# main.py - COMPLETE UPDATED VERSION WITH ALL ROUTES PRESERVED
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, date
 import logging
 import traceback
 import os
+import sys
+import uuid
 from contextlib import asynccontextmanager
+
+# Import supabase client
+from app.supabase_client import supabase
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -50,7 +55,7 @@ app = FastAPI(
     title="MyOffice API",
     version="1.0.0",
     description="Complete office management system with equipment, employees, and spares inventory",
-    redirect_slashes=False,
+    redirect_slashes=True,
     lifespan=lifespan
 )
 
@@ -85,7 +90,8 @@ async def root():
             "spares": "/api/spares",
             "notices": "/api/notices",
             "availability": "/api/availabilities",
-            "timesheets": "/api/timesheets"
+            "timesheets": "/api/timesheets",
+            "requisitions": "/api/requisitions"
         }
     }
 
@@ -183,7 +189,7 @@ async def standby_health_check():
         "timestamp": datetime.utcnow().isoformat()
     }
 
-# ===== DIRECT AVAILABILITY ENDPOINTS (NEW - ALWAYS WORK) =====
+# ===== DIRECT AVAILABILITY ENDPOINTS =====
 class AvailabilityStats(BaseModel):
     totalEquipment: int = 0
     operational: int = 0
@@ -197,7 +203,7 @@ class AvailabilityStats(BaseModel):
     monthAvailability: float = 0.0
     weekAvailability: float = 0.0
 
-# Mock equipment data for availability (temporary - can be replaced with database)
+# Mock equipment data for availability
 mock_equipment_db = [
     {
         "id": "1",
@@ -260,7 +266,6 @@ async def get_availability_stats():
     """Get availability statistics"""
     logger.info("Calculating availability statistics...")
     
-    # Calculate from mock data
     total_equipment = len(mock_equipment_db)
     operational = sum(1 for e in mock_equipment_db if e["status"] == "operational")
     in_maintenance = sum(1 for e in mock_equipment_db if e["status"] == "maintenance")
@@ -309,7 +314,7 @@ async def availability_health_check():
 # ===== INITIALIZE LOADED ROUTERS DICTIONARY =====
 loaded_routers = {}
 
-# ===== CRITICAL: SPARES ROUTER - MUST WORK FOR INVENTORY =====
+# ===== CRITICAL: SPARES ROUTER =====
 logger.info("🔄 CRITICAL: Loading spares router...")
 
 try:
@@ -318,7 +323,6 @@ try:
     loaded_routers["spares"] = spares_router
     logger.info("✅ SPARES ROUTER SUCCESSFULLY LOADED at /api/spares")
     
-    # Log all spares routes
     logger.info("📋 Spares routes registered:")
     for route in spares_router.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
@@ -359,7 +363,7 @@ except ImportError as e:
     logger.error(f"❌ Failed to import breakdowns router: {e}")
     loaded_routers["breakdowns"] = None
 
-# ===== CRITICAL: STANDBY ROUTER - MUST WORK =====
+# ===== CRITICAL: STANDBY ROUTER =====
 logger.info("🔄 CRITICAL: Loading standby router...")
 
 try:
@@ -368,7 +372,6 @@ try:
     loaded_routers["standby"] = standby_router
     logger.info("✅ STANDBY ROUTER SUCCESSFULLY LOADED at /api/standby")
     
-    # Log all standby routes
     logger.info("📋 Standby routes registered:")
     for route in standby_router.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
@@ -385,7 +388,7 @@ except Exception as e:
     logger.error(traceback.format_exc())
     loaded_routers["standby"] = None
 
-# ===== NOTICEBOARD ROUTER (CRITICAL - NEW) - FIXED IMPORT PATH =====
+# ===== NOTICEBOARD ROUTER =====
 logger.info("🔄 CRITICAL: Loading noticeboard router...")
 
 try:
@@ -394,7 +397,6 @@ try:
     loaded_routers["noticeboard"] = noticeboard_router
     logger.info("✅ NOTICEBOARD ROUTER SUCCESSFULLY LOADED at /api/notices")
     
-    # Log all noticeboard routes
     logger.info("📋 Noticeboard routes registered:")
     for route in noticeboard_router.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
@@ -444,7 +446,7 @@ except Exception as e:
     logger.error(traceback.format_exc())
     loaded_routers["noticeboard"] = None
 
-# ===== AVAILABILITY ROUTER (NEW) =====
+# ===== AVAILABILITY ROUTER =====
 logger.info("🔄 Loading availability router...")
 
 try:
@@ -453,14 +455,14 @@ try:
     loaded_routers["availability"] = availability_router
     logger.info("✅ AVAILABILITY ROUTER SUCCESSFULLY LOADED at /api/availabilities")
 except ImportError as e:
-    logger.warning(f"⚠️  Failed to import availability router: {e}")
-    logger.info("⚠️  Using direct availability endpoints instead")
+    logger.warning(f"⚠️ Failed to import availability router: {e}")
+    logger.info("⚠️ Using direct availability endpoints instead")
     loaded_routers["availability"] = None
 except Exception as e:
     logger.error(f"❌ Error including availability router: {e}")
     loaded_routers["availability"] = None
 
-# ===== EMPLOYEES ROUTER (CRITICAL FOR STANDBY) =====
+# ===== EMPLOYEES ROUTER =====
 logger.info("🔄 Loading employees router...")
 
 try:
@@ -472,7 +474,7 @@ except ImportError as e:
     logger.error(f"❌ Failed to import employees router: {e}")
     loaded_routers["employees"] = None
 
-# ===== TIMESHEETS ROUTER (NEW - CRITICAL FOR TIMESHEET SYSTEM) =====
+# ===== TIMESHEETS ROUTER =====
 logger.info("🔄 CRITICAL: Loading timesheets router...")
 
 try:
@@ -481,7 +483,6 @@ try:
     loaded_routers["timesheets"] = timesheets_router
     logger.info("✅ TIMESHEETS ROUTER SUCCESSFULLY LOADED at /api/timesheets")
     
-    # Log all timesheets routes
     logger.info("📋 Timesheets routes registered:")
     for route in timesheets_router.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
@@ -497,6 +498,35 @@ except Exception as e:
     logger.error(f"❌ CRITICAL ERROR: Error including timesheets router: {e}")
     logger.error(traceback.format_exc())
     loaded_routers["timesheets"] = None
+
+# ===== CRITICAL: REQUISITIONS ROUTER - CORRECT IMPORT PATH =====
+logger.info("🔄 CRITICAL: Loading requisitions router...")
+
+try:
+    # CORRECT IMPORT - using routers folder where your file actually is
+    from app.routers.requisitions import router as requisitions_router
+    
+    app.include_router(requisitions_router, prefix="/api/requisitions", tags=["Requisitions"])
+    loaded_routers["requisitions"] = requisitions_router
+    logger.info("✅ REQUISITIONS ROUTER SUCCESSFULLY LOADED at /api/requisitions")
+    
+    # Log all requisitions routes
+    logger.info("📋 Requisitions routes registered:")
+    for route in requisitions_router.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = list(route.methods) if hasattr(route, 'methods') else []
+            path = route.path if route.path else "/"
+            logger.info(f"   {methods} /api/requisitions{path}")
+            
+except ImportError as e:
+    logger.error(f"❌ CRITICAL ERROR: Failed to import requisitions router: {e}")
+    logger.error(f"❌ Make sure the file exists at: app/routers/requisitions.py")
+    logger.error(traceback.format_exc())
+    loaded_routers["requisitions"] = None
+except Exception as e:
+    logger.error(f"❌ CRITICAL ERROR: Error including requisitions router: {e}")
+    logger.error(traceback.format_exc())
+    loaded_routers["requisitions"] = None
 
 # ===== EQUIPMENT ROUTER =====
 logger.info("🔄 Loading equipment router...")
@@ -557,7 +587,7 @@ for router_name in routers_to_import:
         logger.error(f"❌ Failed to import {router_name} router: {e}")
         loaded_routers[router_name] = None
 
-# ===== DIRECT NOTICE ENDPOINTS AS FALLBACK (Always available) =====
+# ===== DIRECT NOTICE ENDPOINTS AS FALLBACK =====
 logger.info("🔄 Adding direct notice endpoints as guaranteed fallback...")
 
 # Direct notice models
@@ -679,6 +709,7 @@ async def debug_all_routes():
         "maintenance_routes": [r for r in routes if 'maintenance' in r['path']],
         "availability_routes": [r for r in routes if 'availabilities' in r['path']],
         "timesheets_routes": [r for r in routes if 'timesheets' in r['path']],
+        "requisitions_routes": [r for r in routes if 'requisitions' in r['path']],
         "routers_loaded": {k: v is not None for k, v in loaded_routers.items()}
     }
 
@@ -695,15 +726,15 @@ async def debug_router_status():
             "breakdowns": loaded_routers.get("breakdowns") is not None,
             "equipment": loaded_routers.get("equipment") is not None,
             "maintenance": loaded_routers.get("maintenance") is not None,
-            "timesheets": loaded_routers.get("timesheets") is not None
+            "timesheets": loaded_routers.get("timesheets") is not None,
+            "requisitions": loaded_routers.get("requisitions") is not None
         },
         "all_routers": {k: v is not None for k, v in loaded_routers.items()},
         "direct_endpoints_available": {
-            "notices": True,  # /api/direct-notices always works
-            "standby": True,  # /api/standby always works
-            "availability": True  # Direct availability endpoints
-        },
-        "note": "Check /api/spares/health/check for spares health"
+            "notices": True,
+            "standby": True,
+            "availability": True
+        }
     }
 
 # ===== HEALTH CHECK ENDPOINTS =====
@@ -828,6 +859,39 @@ async def timesheets_health_check():
             ]
         }
 
+@app.get("/api/requisitions/health")
+async def requisitions_health_check():
+    """Health check for requisitions router"""
+    requisitions_router = loaded_routers.get("requisitions")
+    if requisitions_router:
+        return {
+            "status": "healthy",
+            "service": "requisitions",
+            "message": "Requisitions router is loaded and ready",
+            "endpoints_available": [
+                "GET /api/requisitions - Get all requisitions",
+                "POST /api/requisitions - Create a requisition",
+                "GET /api/requisitions/{id} - Get a specific requisition",
+                "PATCH /api/requisitions/{id} - Update a requisition",
+                "DELETE /api/requisitions/{id} - Delete a requisition",
+                "GET /api/requisitions/daily-total/{date} - Get daily total",
+                "GET /api/requisitions/stats/summary - Get statistics"
+            ]
+        }
+    else:
+        return {
+            "status": "unhealthy",
+            "service": "requisitions",
+            "message": "Requisitions router not loaded",
+            "fix_steps": [
+                "1. Check that app/routers/requisitions.py exists",
+                "2. Check for syntax errors in requisitions.py",
+                "3. Check supabase_client.py connection",
+                "4. Check database tables 'requisitions' and 'requisition_items' exist",
+                "5. Restart the backend server"
+            ]
+        }
+
 # ===== TEST ENDPOINTS =====
 @app.get("/api/test-availability-connection")
 async def test_availability_connection():
@@ -860,7 +924,9 @@ async def test_all_connections():
         test_results["basic_health"] = {"status": "error", "error": str(e)}
     
     # Test each critical router
-    critical_routers = ["spares", "standby", "noticeboard", "availability", "employees", "daily_reports", "breakdowns", "equipment", "maintenance", "timesheets"]
+    critical_routers = ["spares", "standby", "noticeboard", "availability", "employees", 
+                        "daily_reports", "breakdowns", "equipment", "maintenance", 
+                        "timesheets", "requisitions"]
     
     for router_name in critical_routers:
         router = loaded_routers.get(router_name)
@@ -878,7 +944,7 @@ async def test_all_connections():
                         methods = list(route.methods) if hasattr(route, 'methods') else []
                         routes.append(f"{methods} {route.path}")
                 
-                test_results[router_name]["endpoints"] = routes[:5]  # First 5 endpoints
+                test_results[router_name]["endpoints"] = routes[:5]
                 test_results[router_name]["total_endpoints"] = len(routes)
             except Exception as e:
                 test_results[router_name]["error"] = str(e)
@@ -939,7 +1005,8 @@ async def startup_event():
         "breakdowns": "Breakdowns",
         "equipment": "Equipment",
         "maintenance": "Maintenance",
-        "timesheets": "Timesheets"
+        "timesheets": "Timesheets",
+        "requisitions": "Requisitions"
     }
     
     for router_name, display_name in critical_routers.items():
@@ -958,6 +1025,11 @@ async def startup_event():
     logger.info(f"   📋 Currently {len(notices_db)} notices in fallback system")
     logger.info(f"   ✅ Timesheets endpoints available at /api/timesheets")
     
+    if loaded_routers.get("requisitions"):
+        logger.info(f"   ✅ Requisitions endpoints available at /api/requisitions")
+    else:
+        logger.error(f"   ❌ REQUISITIONS ROUTER FAILED TO LOAD - CHECK app/routers/requisitions.py")
+    
     # Log all routes for debugging
     logger.info("📋 All registered routes by category:")
     
@@ -973,6 +1045,7 @@ async def startup_event():
         "daily_reports": [],
         "breakdowns": [],
         "timesheets": [],
+        "requisitions": [],
         "other": []
     }
     
@@ -994,7 +1067,7 @@ async def startup_event():
     for category, routes in route_categories.items():
         if routes:
             logger.info(f"📝 {category.replace('_', ' ').title()} routes ({len(routes)}):")
-            for route in routes[:3]:  # Show first 3 routes
+            for route in routes[:3]:
                 logger.info(f"   {route}")
             if len(routes) > 3:
                 logger.info(f"   ... and {len(routes) - 3} more")
@@ -1014,15 +1087,23 @@ async def startup_event():
         logger.info("📊 Timesheets System is ready at:")
         for route in route_categories["timesheets"][:5]:
             logger.info(f"   {route}")
+    
+    # Special notice for requisitions routes
+    if route_categories["requisitions"]:
+        logger.info("📊 Requisitions System is ready at:")
+        for route in route_categories["requisitions"][:5]:
+            logger.info(f"   {route}")
+    else:
+        logger.error("❌❌❌ NO REQUISITIONS ROUTES FOUND! ❌❌❌")
 
 # ===== SHUTDOWN EVENT =====
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("🛑 Application shutting down...")
 
-# ===== VERCELL HANDLER =====
+# ===== VERCEL HANDLER =====
 from mangum import Mangum
 handler = Mangum(app)
 
-logger.info("🏁 Main.py setup completed - All routers initialized including Timesheets")
-logger.info("🏁 Direct endpoints available: /api/availabilities, /api/standby, /api/direct-notices, /api/timesheets")
+logger.info("🏁 Main.py setup completed - All routers initialized including Timesheets and Requisitions")
+logger.info("🏁 Direct endpoints available: /api/availabilities, /api/standby, /api/direct-notices, /api/timesheets, /api/requisitions")

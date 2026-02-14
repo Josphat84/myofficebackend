@@ -141,3 +141,4 @@ async def get_availability_history(equipment_id: int, days: int = 30):
     except Exception as e:
         logger.error(f"Error fetching history: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching history: {str(e)}")
+    
