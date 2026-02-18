@@ -91,7 +91,8 @@ async def root():
             "notices": "/api/notices",
             "availability": "/api/availabilities",
             "timesheets": "/api/timesheets",
-            "requisitions": "/api/requisitions"
+            "requisitions": "/api/requisitions",
+            "schedules": "/api/schedules"          # <-- added schedules endpoint
         }
     }
 
@@ -527,6 +528,18 @@ except Exception as e:
     logger.error(f"❌ CRITICAL ERROR: Error including requisitions router: {e}")
     logger.error(traceback.format_exc())
     loaded_routers["requisitions"] = None
+
+# ===== SCHEDULES ROUTER =====
+logger.info("🔄 Loading schedules router...")
+
+try:
+    from app.routers.schedules import router as schedules_router
+    app.include_router(schedules_router, prefix="/api/schedules", tags=["Schedules"])
+    loaded_routers["schedules"] = schedules_router
+    logger.info("✅ SCHEDULES ROUTER SUCCESSFULLY LOADED at /api/schedules")
+except ImportError as e:
+    logger.error(f"❌ Failed to import schedules router: {e}")
+    loaded_routers["schedules"] = None
 
 # ===== EQUIPMENT ROUTER =====
 logger.info("🔄 Loading equipment router...")
