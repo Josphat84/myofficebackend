@@ -1,635 +1,228 @@
-# main.py
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+# leaves.py – simplified, no join, uses stored fields only
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field, validator
 from typing import Optional, List
-from datetime import datetime, date, timedelta
-import time
+from datetime import date, datetime
+from app.supabase_client import supabase
+import logging
 
-app = FastAPI()
+logger = logging.getLogger(__name__)
 
-# CORS setup - Allow all origins for development
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
-)
+router = APIRouter()
 
-# In-memory storage
-employees_db = []
-standby_db = []
-next_employee_id = 1
-next_schedule_id = 1
+# ---------- Models ----------
+class LeaveCreate(BaseModel):
+    employee_id: str = Field(...)
+    employee_name: str = Field(...)        # from frontend
+    position: str = Field(...)             # from frontend
+    contact_number: str = Field(...)       # from frontend
+    department: Optional[str] = None       # from frontend
+    manager_name: Optional[str] = None     # from frontend
+    leave_type: str = Field(...)
+    start_date: date = Field(...)
+    end_date: date = Field(...)
+    reason: str = Field(..., min_length=1)
+    emergency_contact: Optional[str] = None
+    handover_to: Optional[str] = None
+    notes: Optional[str] = None
 
-# Models
-class EmployeeBase(BaseModel):
-    name: str
-    position: str
-    designation: Optional[str] = None
-    department: str
-    contact: str
-    email: str
-    location: str
-    is_active: bool = True
+    @validator('end_date')
+    def end_date_after_start_date(cls, v, values):
+        if 'start_date' in values and v < values['start_date']:
+            raise ValueError('End date must be after start date')
+        return v
 
-class EmployeeCreate(EmployeeBase):
-    pass
+class LeaveUpdate(BaseModel):
+    leave_type: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    reason: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    handover_to: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
 
-class Employee(EmployeeBase):
+    @validator('end_date')
+    def end_date_after_start_date(cls, v, values):
+        if v is not None and values.get('start_date') is not None and v < values['start_date']:
+            raise ValueError('End date must be after start date')
+        return v
+
+class LeaveResponse(BaseModel):
     id: int
-    created_at: str
-    updated_at: str
-
-class StandbyBase(BaseModel):
-    employee_id: int
+    employee_id: str
+    employee_name: str
+    position: str
+    contact_number: str
+    department: Optional[str] = None
+    manager_name: Optional[str] = None
+    leave_type: str
     start_date: date
     end_date: date
-    residence: str
-    status: str = "scheduled"
-    priority: str = "medium"
-    notes: Optional[str] = None
-    notified: bool = False
+    total_days: int
+    reason: str
+    emergency_contact: Optional[str]
+    handover_to: Optional[str]
+    status: str
+    applied_date: datetime
+    updated_at: Optional[datetime]
+    notes: Optional[str]
 
-class StandbyCreate(StandbyBase):
-    pass
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            date: lambda v: v.isoformat(),
+            datetime: lambda v: v.isoformat()
+        }
 
-class Standby(StandbyBase):
-    id: int
-    duration_days: Optional[int] = None
-    created_at: str
-    updated_at: str
-
-class StandbyWithEmployee(Standby):
-    employee: Optional[Employee] = None
-
-# Helper functions
-def get_current_timestamp():
-    return datetime.now().isoformat()
-
-def calculate_duration(start_date: date, end_date: date) -> int:
+# ---------- Helper ----------
+def calculate_total_days(start_date: date, end_date: date) -> int:
     return (end_date - start_date).days + 1
 
-def find_employee(employee_id: int) -> Optional[Employee]:
-    for emp in employees_db:
-        if emp.id == employee_id:
-            return emp
-    return None
+def get_supabase_data(response):
+    if hasattr(response, 'data'):
+        return response.data
+    return response
 
-def find_schedule(schedule_id: int) -> Optional[Standby]:
-    for schedule in standby_db:
-        if schedule.id == schedule_id:
-            return schedule
-    return None
+# ---------- POST create leave ----------
+@router.post("", response_model=LeaveResponse)
+@router.post("/", response_model=LeaveResponse)
+async def create_leave(leave: LeaveCreate):
+    try:
+        total_days = calculate_total_days(leave.start_date, leave.end_date)
 
-# Root endpoint - Should return 200 OK
-@app.get("/")
-def root():
-    return {
-        "message": "Standby Management API is running",
-        "version": "1.0.0",
-        "endpoints": {
-            "employees": "/api/employees",
-            "standby": "/api/standby",
-            "health": "/health"
+        data_to_insert = {
+            "employee_id": leave.employee_id,
+            "employee_name": leave.employee_name,
+            "position": leave.position,
+            "contact_number": leave.contact_number,
+            "department": leave.department,
+            "manager_name": leave.manager_name,
+            "leave_type": leave.leave_type,
+            "start_date": leave.start_date.isoformat(),
+            "end_date": leave.end_date.isoformat(),
+            "total_days": total_days,
+            "reason": leave.reason,
+            "emergency_contact": leave.emergency_contact,
+            "handover_to": leave.handover_to,
+            "notes": leave.notes,
+            "status": "pending",
+            "applied_date": datetime.utcnow().isoformat(),
         }
-    }
 
-# Test endpoint to verify API is accessible
-@app.get("/test")
-def test_endpoint():
-    return {"status": "ok", "message": "API is working"}
+        result = supabase.table("leaves").insert(data_to_insert).execute()
+        created = get_supabase_data(result)
+        if not created:
+            raise HTTPException(status_code=500, detail="No data returned after insertion")
 
-# Employee endpoints
-@app.get("/api/employees")
-def get_employees():
-    """Get all employees"""
-    return employees_db
+        return created[0]
+    except Exception as e:
+        logger.error(f"Error creating leave: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error creating leave: {str(e)}")
 
-@app.get("/api/employees/{employee_id}")
-def get_employee(employee_id: int):
-    """Get employee by ID"""
-    employee = find_employee(employee_id)
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    return employee
+# ---------- GET all leaves ----------
+@router.get("", response_model=List[LeaveResponse])
+@router.get("/", response_model=List[LeaveResponse])
+async def get_leaves(status: Optional[str] = None, leave_type: Optional[str] = None):
+    try:
+        query = supabase.table("leaves").select("*")
+        if status:
+            query = query.eq("status", status)
+        if leave_type:
+            query = query.eq("leave_type", leave_type)
+        query = query.order("applied_date", desc=True)
+        response = query.execute()
+        data = get_supabase_data(response)
+        return data or []
+    except Exception as e:
+        logger.error(f"Error fetching leaves: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching leaves: {str(e)}")
 
-@app.post("/api/employees")
-def create_employee(employee: EmployeeCreate):
-    """Create a new employee"""
-    global next_employee_id
-    timestamp = get_current_timestamp()
-    
-    new_employee = Employee(
-        id=next_employee_id,
-        created_at=timestamp,
-        updated_at=timestamp,
-        **employee.dict()
-    )
-    
-    employees_db.append(new_employee)
-    next_employee_id += 1
-    
-    return new_employee
-
-@app.put("/api/employees/{employee_id}")
-def update_employee(employee_id: int, employee_update: EmployeeCreate):
-    """Update an employee"""
-    for i, emp in enumerate(employees_db):
-        if emp.id == employee_id:
-            # Update employee
-            updated_employee = Employee(
-                id=employee_id,
-                created_at=emp.created_at,
-                updated_at=get_current_timestamp(),
-                **employee_update.dict()
-            )
-            employees_db[i] = updated_employee
-            return updated_employee
-    
-    raise HTTPException(status_code=404, detail="Employee not found")
-
-@app.delete("/api/employees/{employee_id}")
-def delete_employee(employee_id: int):
-    """Delete an employee"""
-    for i, emp in enumerate(employees_db):
-        if emp.id == employee_id:
-            employees_db.pop(i)
-            # Also delete associated standby schedules
-            global standby_db
-            standby_db = [s for s in standby_db if s.employee_id != employee_id]
-            return {"message": "Employee deleted successfully"}
-    
-    raise HTTPException(status_code=404, detail="Employee not found")
-
-# Standby endpoints
-@app.get("/api/standby")
-def get_standby_schedules():
-    """Get all standby schedules with employee data"""
-    schedules_with_employee = []
-    
-    for schedule in standby_db:
-        schedule_dict = schedule.dict()
-        employee = find_employee(schedule.employee_id)
-        schedule_dict["employee"] = employee
-        schedules_with_employee.append(StandbyWithEmployee(**schedule_dict))
-    
-    return schedules_with_employee
-
-@app.get("/api/standby/{schedule_id}")
-def get_standby_schedule(schedule_id: int):
-    """Get standby schedule by ID"""
-    schedule = find_schedule(schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    
-    schedule_dict = schedule.dict()
-    employee = find_employee(schedule.employee_id)
-    schedule_dict["employee"] = employee
-    
-    return StandbyWithEmployee(**schedule_dict)
-
-@app.post("/api/standby")
-def create_standby_schedule(schedule: StandbyCreate):
-    """Create a new standby schedule"""
-    # Check if employee exists
-    employee = find_employee(schedule.employee_id)
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    global next_schedule_id
-    timestamp = get_current_timestamp()
-    
-    # Calculate duration
-    duration = calculate_duration(schedule.start_date, schedule.end_date)
-    
-    new_schedule = Standby(
-        id=next_schedule_id,
-        duration_days=duration,
-        created_at=timestamp,
-        updated_at=timestamp,
-        **schedule.dict()
-    )
-    
-    standby_db.append(new_schedule)
-    next_schedule_id += 1
-    
-    return new_schedule
-
-# Alternative endpoint for frontend compatibility
-@app.post("/api/standby/create")
-def create_standby_schedule_alt(schedule: StandbyCreate):
-    """Alternative endpoint for creating standby schedules"""
-    return create_standby_schedule(schedule)
-
-@app.put("/api/standby/{schedule_id}")
-def update_standby_schedule(schedule_id: int, schedule_update: StandbyCreate):
-    """Update a standby schedule"""
-    for i, schedule in enumerate(standby_db):
-        if schedule.id == schedule_id:
-            # Check if employee exists
-            employee = find_employee(schedule_update.employee_id)
-            if not employee:
-                raise HTTPException(status_code=404, detail="Employee not found")
-            
-            # Calculate duration
-            duration = calculate_duration(schedule_update.start_date, schedule_update.end_date)
-            
-            updated_schedule = Standby(
-                id=schedule_id,
-                duration_days=duration,
-                created_at=schedule.created_at,
-                updated_at=get_current_timestamp(),
-                **schedule_update.dict()
-            )
-            
-            standby_db[i] = updated_schedule
-            return updated_schedule
-    
-    raise HTTPException(status_code=404, detail="Schedule not found")
-
-@app.patch("/api/standby/{schedule_id}")
-def patch_standby_schedule(
-    schedule_id: int,
-    status: Optional[str] = None,
-    priority: Optional[str] = None,
-    notified: Optional[bool] = None
-):
-    """Partially update a standby schedule"""
-    schedule = find_schedule(schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    
-    schedule_dict = schedule.dict()
-    
-    if status is not None:
-        schedule_dict["status"] = status
-    
-    if priority is not None:
-        schedule_dict["priority"] = priority
-    
-    if notified is not None:
-        schedule_dict["notified"] = notified
-    
-    schedule_dict["updated_at"] = get_current_timestamp()
-    
-    # Update in database
-    for i, sched in enumerate(standby_db):
-        if sched.id == schedule_id:
-            updated_schedule = Standby(**schedule_dict)
-            standby_db[i] = updated_schedule
-            return updated_schedule
-    
-    return schedule_dict
-
-@app.delete("/api/standby/{schedule_id}")
-def delete_standby_schedule(schedule_id: int):
-    """Delete a standby schedule"""
-    for i, schedule in enumerate(standby_db):
-        if schedule.id == schedule_id:
-            standby_db.pop(i)
-            return {"message": "Schedule deleted successfully"}
-    
-    raise HTTPException(status_code=404, detail="Schedule not found")
-
-# Health check endpoint
-@app.get("/health")
-def health_check():
-    return {
-        "status": "healthy",
-        "message": "Standby Management API is running",
-        "timestamp": get_current_timestamp(),
-        "counts": {
-            "employees": len(employees_db),
-            "standby_schedules": len(standby_db)
+# ---------- GET leave stats ----------
+@router.get("/stats/summary")
+async def get_leave_stats():
+    try:
+        response = supabase.table("leaves").select("*").execute()
+        data = get_supabase_data(response) or []
+        today = date.today().isoformat()
+        total = len(data)
+        pending = sum(1 for l in data if l.get('status') == 'pending')
+        approved = sum(1 for l in data if l.get('status') == 'approved')
+        rejected = sum(1 for l in data if l.get('status') == 'rejected')
+        on_leave_now = sum(1 for l in data if l.get('status') == 'approved' and l.get('start_date') <= today <= l.get('end_date'))
+        upcoming = sum(1 for l in data if l.get('status') == 'approved' and l.get('start_date') > today)
+        return {
+            "total": total,
+            "pending": pending,
+            "approved": approved,
+            "rejected": rejected,
+            "on_leave_now": on_leave_now,
+            "upcoming": upcoming
         }
-    }
+    except Exception as e:
+        logger.error(f"Error fetching stats: {str(e)}")
+        return {"total": 0, "pending": 0, "approved": 0, "rejected": 0, "on_leave_now": 0, "upcoming": 0}
 
-# Clear all data (for testing/reset)
-@app.delete("/api/clear")
-def clear_all_data():
-    """Clear all data (for testing purposes)"""
-    global employees_db, standby_db, next_employee_id, next_schedule_id
-    employees_db = []
-    standby_db = []
-    next_employee_id = 1
-    next_schedule_id = 1
-    return {"message": "All data cleared successfully"}# main.py
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, List
-from datetime import datetime, date, timedelta
-import time
+# ---------- GET leave by id ----------
+@router.get("/{leave_id}", response_model=LeaveResponse)
+async def get_leave(leave_id: int):
+    try:
+        resp = supabase.table("leaves").select("*").eq("id", leave_id).execute()
+        data = get_supabase_data(resp)
+        if not data:
+            raise HTTPException(status_code=404, detail="Leave not found")
+        return data[0]
+    except Exception as e:
+        logger.error(f"Error fetching leave {leave_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-app = FastAPI()
+# ---------- PATCH update leave ----------
+@router.patch("/{leave_id}", response_model=LeaveResponse)
+async def update_leave(leave_id: int, updated: LeaveUpdate):
+    try:
+        existing_resp = supabase.table("leaves").select("*").eq("id", leave_id).execute()
+        existing = get_supabase_data(existing_resp)
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"Leave with ID {leave_id} not found")
 
-# CORS setup - Allow all origins for development
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
-)
+        data_to_update = updated.dict(exclude_unset=True)
 
-# In-memory storage
-employees_db = []
-standby_db = []
-next_employee_id = 1
-next_schedule_id = 1
+        if 'start_date' in data_to_update or 'end_date' in data_to_update:
+            current = existing[0]
+            start = data_to_update.get('start_date', date.fromisoformat(current['start_date']))
+            end = data_to_update.get('end_date', date.fromisoformat(current['end_date']))
+            data_to_update['total_days'] = calculate_total_days(start, end)
 
-# Models
-class EmployeeBase(BaseModel):
-    name: str
-    position: str
-    designation: Optional[str] = None
-    department: str
-    contact: str
-    email: str
-    location: str
-    is_active: bool = True
+        if 'start_date' in data_to_update and isinstance(data_to_update['start_date'], date):
+            data_to_update['start_date'] = data_to_update['start_date'].isoformat()
+        if 'end_date' in data_to_update and isinstance(data_to_update['end_date'], date):
+            data_to_update['end_date'] = data_to_update['end_date'].isoformat()
 
-class EmployeeCreate(EmployeeBase):
-    pass
+        if not data_to_update:
+            return existing[0]
 
-class Employee(EmployeeBase):
-    id: int
-    created_at: str
-    updated_at: str
+        result = supabase.table("leaves").update(data_to_update).eq("id", leave_id).execute()
+        updated_data = get_supabase_data(result)
+        if not updated_data:
+            fetch_resp = supabase.table("leaves").select("*").eq("id", leave_id).execute()
+            fetched = get_supabase_data(fetch_resp)
+            if not fetched:
+                raise HTTPException(status_code=500, detail="No data returned after update")
+            return fetched[0]
+        return updated_data[0]
+    except Exception as e:
+        logger.error(f"Error updating leave {leave_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error updating leave: {str(e)}")
 
-class StandbyBase(BaseModel):
-    employee_id: int
-    start_date: date
-    end_date: date
-    residence: str
-    status: str = "scheduled"
-    priority: str = "medium"
-    notes: Optional[str] = None
-    notified: bool = False
-
-class StandbyCreate(StandbyBase):
-    pass
-
-class Standby(StandbyBase):
-    id: int
-    duration_days: Optional[int] = None
-    created_at: str
-    updated_at: str
-
-class StandbyWithEmployee(Standby):
-    employee: Optional[Employee] = None
-
-# Helper functions
-def get_current_timestamp():
-    return datetime.now().isoformat()
-
-def calculate_duration(start_date: date, end_date: date) -> int:
-    return (end_date - start_date).days + 1
-
-def find_employee(employee_id: int) -> Optional[Employee]:
-    for emp in employees_db:
-        if emp.id == employee_id:
-            return emp
-    return None
-
-def find_schedule(schedule_id: int) -> Optional[Standby]:
-    for schedule in standby_db:
-        if schedule.id == schedule_id:
-            return schedule
-    return None
-
-# Root endpoint - Should return 200 OK
-@app.get("/")
-def root():
-    return {
-        "message": "Standby Management API is running",
-        "version": "1.0.0",
-        "endpoints": {
-            "employees": "/api/employees",
-            "standby": "/api/standby",
-            "health": "/health"
-        }
-    }
-
-# Test endpoint to verify API is accessible
-@app.get("/test")
-def test_endpoint():
-    return {"status": "ok", "message": "API is working"}
-
-# Employee endpoints
-@app.get("/api/employees")
-def get_employees():
-    """Get all employees"""
-    return employees_db
-
-@app.get("/api/employees/{employee_id}")
-def get_employee(employee_id: int):
-    """Get employee by ID"""
-    employee = find_employee(employee_id)
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    return employee
-
-@app.post("/api/employees")
-def create_employee(employee: EmployeeCreate):
-    """Create a new employee"""
-    global next_employee_id
-    timestamp = get_current_timestamp()
-    
-    new_employee = Employee(
-        id=next_employee_id,
-        created_at=timestamp,
-        updated_at=timestamp,
-        **employee.dict()
-    )
-    
-    employees_db.append(new_employee)
-    next_employee_id += 1
-    
-    return new_employee
-
-@app.put("/api/employees/{employee_id}")
-def update_employee(employee_id: int, employee_update: EmployeeCreate):
-    """Update an employee"""
-    for i, emp in enumerate(employees_db):
-        if emp.id == employee_id:
-            # Update employee
-            updated_employee = Employee(
-                id=employee_id,
-                created_at=emp.created_at,
-                updated_at=get_current_timestamp(),
-                **employee_update.dict()
-            )
-            employees_db[i] = updated_employee
-            return updated_employee
-    
-    raise HTTPException(status_code=404, detail="Employee not found")
-
-@app.delete("/api/employees/{employee_id}")
-def delete_employee(employee_id: int):
-    """Delete an employee"""
-    for i, emp in enumerate(employees_db):
-        if emp.id == employee_id:
-            employees_db.pop(i)
-            # Also delete associated standby schedules
-            global standby_db
-            standby_db = [s for s in standby_db if s.employee_id != employee_id]
-            return {"message": "Employee deleted successfully"}
-    
-    raise HTTPException(status_code=404, detail="Employee not found")
-
-# Standby endpoints
-@app.get("/api/standby")
-def get_standby_schedules():
-    """Get all standby schedules with employee data"""
-    schedules_with_employee = []
-    
-    for schedule in standby_db:
-        schedule_dict = schedule.dict()
-        employee = find_employee(schedule.employee_id)
-        schedule_dict["employee"] = employee
-        schedules_with_employee.append(StandbyWithEmployee(**schedule_dict))
-    
-    return schedules_with_employee
-
-@app.get("/api/standby/{schedule_id}")
-def get_standby_schedule(schedule_id: int):
-    """Get standby schedule by ID"""
-    schedule = find_schedule(schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    
-    schedule_dict = schedule.dict()
-    employee = find_employee(schedule.employee_id)
-    schedule_dict["employee"] = employee
-    
-    return StandbyWithEmployee(**schedule_dict)
-
-@app.post("/api/standby")
-def create_standby_schedule(schedule: StandbyCreate):
-    """Create a new standby schedule"""
-    # Check if employee exists
-    employee = find_employee(schedule.employee_id)
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    global next_schedule_id
-    timestamp = get_current_timestamp()
-    
-    # Calculate duration
-    duration = calculate_duration(schedule.start_date, schedule.end_date)
-    
-    new_schedule = Standby(
-        id=next_schedule_id,
-        duration_days=duration,
-        created_at=timestamp,
-        updated_at=timestamp,
-        **schedule.dict()
-    )
-    
-    standby_db.append(new_schedule)
-    next_schedule_id += 1
-    
-    return new_schedule
-
-# Alternative endpoint for frontend compatibility
-@app.post("/api/standby/create")
-def create_standby_schedule_alt(schedule: StandbyCreate):
-    """Alternative endpoint for creating standby schedules"""
-    return create_standby_schedule(schedule)
-
-@app.put("/api/standby/{schedule_id}")
-def update_standby_schedule(schedule_id: int, schedule_update: StandbyCreate):
-    """Update a standby schedule"""
-    for i, schedule in enumerate(standby_db):
-        if schedule.id == schedule_id:
-            # Check if employee exists
-            employee = find_employee(schedule_update.employee_id)
-            if not employee:
-                raise HTTPException(status_code=404, detail="Employee not found")
-            
-            # Calculate duration
-            duration = calculate_duration(schedule_update.start_date, schedule_update.end_date)
-            
-            updated_schedule = Standby(
-                id=schedule_id,
-                duration_days=duration,
-                created_at=schedule.created_at,
-                updated_at=get_current_timestamp(),
-                **schedule_update.dict()
-            )
-            
-            standby_db[i] = updated_schedule
-            return updated_schedule
-    
-    raise HTTPException(status_code=404, detail="Schedule not found")
-
-@app.patch("/api/standby/{schedule_id}")
-def patch_standby_schedule(
-    schedule_id: int,
-    status: Optional[str] = None,
-    priority: Optional[str] = None,
-    notified: Optional[bool] = None
-):
-    """Partially update a standby schedule"""
-    schedule = find_schedule(schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    
-    schedule_dict = schedule.dict()
-    
-    if status is not None:
-        schedule_dict["status"] = status
-    
-    if priority is not None:
-        schedule_dict["priority"] = priority
-    
-    if notified is not None:
-        schedule_dict["notified"] = notified
-    
-    schedule_dict["updated_at"] = get_current_timestamp()
-    
-    # Update in database
-    for i, sched in enumerate(standby_db):
-        if sched.id == schedule_id:
-            updated_schedule = Standby(**schedule_dict)
-            standby_db[i] = updated_schedule
-            return updated_schedule
-    
-    return schedule_dict
-
-@app.delete("/api/standby/{schedule_id}")
-def delete_standby_schedule(schedule_id: int):
-    """Delete a standby schedule"""
-    for i, schedule in enumerate(standby_db):
-        if schedule.id == schedule_id:
-            standby_db.pop(i)
-            return {"message": "Schedule deleted successfully"}
-    
-    raise HTTPException(status_code=404, detail="Schedule not found")
-
-# Health check endpoint
-@app.get("/health")
-def health_check():
-    return {
-        "status": "healthy",
-        "message": "Standby Management API is running",
-        "timestamp": get_current_timestamp(),
-        "counts": {
-            "employees": len(employees_db),
-            "standby_schedules": len(standby_db)
-        }
-    }
-
-# Clear all data (for testing/reset)
-@app.delete("/api/clear")
-def clear_all_data():
-    """Clear all data (for testing purposes)"""
-    global employees_db, standby_db, next_employee_id, next_schedule_id
-    employees_db = []
-    standby_db = []
-    next_employee_id = 1
-    next_schedule_id = 1
-    return {"message": "All data cleared successfully"}
+# ---------- DELETE leave ----------
+@router.delete("/{leave_id}")
+async def delete_leave(leave_id: int):
+    try:
+        existing_resp = supabase.table("leaves").select("id").eq("id", leave_id).execute()
+        if not get_supabase_data(existing_resp):
+            raise HTTPException(status_code=404, detail=f"Leave with ID {leave_id} not found")
+        supabase.table("leaves").delete().eq("id", leave_id).execute()
+        return {"success": True, "detail": f"Leave {leave_id} deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting leave {leave_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting leave: {str(e)}")

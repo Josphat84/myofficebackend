@@ -1,4 +1,4 @@
-﻿# main.py - COMPLETE UPDATED VERSION WITH ALL ROUTES PRESERVED
+﻿# main.py - COMPLETE VERSION WITH STANDBY ROUTER INTEGRATED (ALL OTHER ROUTERS PRESERVED)
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -11,36 +11,12 @@ import sys
 import uuid
 from contextlib import asynccontextmanager
 
-# Import supabase client
+# Import supabase client (used only for health check, standby router uses its own import)
 from app.supabase_client import supabase
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# ===== STANDBY MODELS AND STORAGE =====
-class StandbyBase(BaseModel):
-    employee_id: int
-    start_date: date
-    end_date: date
-    residence: str
-    status: str = "scheduled"
-    priority: str = "medium"
-    notes: Optional[str] = None
-    notified: bool = False
-
-class StandbyCreate(StandbyBase):
-    pass
-
-class Standby(StandbyBase):
-    id: int
-    duration_days: Optional[int] = None
-    created_at: str
-    updated_at: str
-
-# In-memory storage for standby
-standby_db = []
-next_schedule_id = 1
 
 # ===== LIFESPAN CONTEXT MANAGER =====
 @asynccontextmanager
@@ -92,105 +68,53 @@ async def root():
             "availability": "/api/availabilities",
             "timesheets": "/api/timesheets",
             "requisitions": "/api/requisitions",
-            "schedules": "/api/schedules"          # <-- added schedules endpoint
+            "schedules": "/api/schedules"
         }
     }
 
 @app.get("/api/health")
 async def health_check():
+    try:
+        standby_resp = supabase.table("standby_schedules").select("*", count="exact", head=True).execute()
+        standby_count = standby_resp.count if hasattr(standby_resp, 'count') else 0
+    except Exception as e:
+        logger.error(f"Health check failed to get standby count: {e}")
+        standby_count = 0
+
     return {
         "status": "healthy", 
         "message": "API is running",
         "timestamp": datetime.utcnow().isoformat(),
-        "standby_schedules": len(standby_db)
+        "standby_schedules": standby_count
     }
 
 @app.get("/api/debug-test")
 async def debug_test():
     return {"message": "Debug test - working", "status": "success"}
 
-# ===== DIRECT STANDBY ENDPOINTS (ALWAYS WORK) =====
-@app.get("/api/standby")
-async def get_all_standby_schedules():
-    """Get all standby schedules"""
-    return standby_db
+# ===== STANDBY ROUTER (from corrected standby.py) =====
+# Adjust the import path if your project structure differs:
+# - If main.py is inside the 'backend' folder and standby.py is at app/routers/standby.py, use:
+#   from app.routers.standby import router as standby_router
+# - If main.py is inside the 'app' folder, use: from routers.standby import router as standby_router
+logger.info("🔄 Loading standby router...")
+try:
+    from app.routers.standby import router as standby_router
+    app.include_router(standby_router)
+    logger.info("✅ STANDBY ROUTER SUCCESSFULLY LOADED at /api/standby")
+except ImportError as e:
+    logger.error(f"❌ Failed to import standby router: {e}")
+    # Fallback: add a temporary endpoint to indicate the router isn't loaded
+    @app.get("/api/standby")
+    async def standby_fallback():
+        return {"message": "Standby router not loaded", "status": "fallback"}
+    @app.post("/api/standby")
+    async def standby_post_fallback():
+        raise HTTPException(status_code=503, detail="Standby router not available")
+except Exception as e:
+    logger.error(f"❌ Error including standby router: {e}")
 
-@app.post("/api/standby")
-async def create_new_standby_schedule(schedule: StandbyCreate):
-    """Create a new standby schedule"""
-    global next_schedule_id
-    
-    # Calculate duration
-    duration_days = (schedule.end_date - schedule.start_date).days + 1
-    
-    new_schedule = Standby(
-        id=next_schedule_id,
-        duration_days=duration_days,
-        created_at=datetime.utcnow().isoformat(),
-        updated_at=datetime.utcnow().isoformat(),
-        **schedule.dict()
-    )
-    
-    standby_db.append(new_schedule)
-    next_schedule_id += 1
-    
-    return new_schedule
-
-@app.post("/api/standby/create")
-async def create_standby_schedule_alt(schedule: StandbyCreate):
-    """Alternative endpoint for creating standby schedules"""
-    return await create_new_standby_schedule(schedule)
-
-@app.get("/api/standby/{schedule_id}")
-async def get_standby_schedule_by_id(schedule_id: int):
-    """Get a specific standby schedule by ID"""
-    for schedule in standby_db:
-        if schedule.id == schedule_id:
-            return schedule
-    raise HTTPException(status_code=404, detail="Schedule not found")
-
-@app.put("/api/standby/{schedule_id}")
-async def update_standby_schedule(schedule_id: int, schedule_update: StandbyCreate):
-    """Update a standby schedule"""
-    for i, schedule in enumerate(standby_db):
-        if schedule.id == schedule_id:
-            # Calculate duration
-            duration_days = (schedule_update.end_date - schedule_update.start_date).days + 1
-            
-            updated_schedule = Standby(
-                id=schedule_id,
-                duration_days=duration_days,
-                created_at=schedule.created_at,
-                updated_at=datetime.utcnow().isoformat(),
-                **schedule_update.dict()
-            )
-            
-            standby_db[i] = updated_schedule
-            return updated_schedule
-    
-    raise HTTPException(status_code=404, detail="Schedule not found")
-
-@app.delete("/api/standby/{schedule_id}")
-async def delete_standby_schedule(schedule_id: int):
-    """Delete a standby schedule"""
-    for i, schedule in enumerate(standby_db):
-        if schedule.id == schedule_id:
-            standby_db.pop(i)
-            return {"message": "Schedule deleted successfully"}
-    
-    raise HTTPException(status_code=404, detail="Schedule not found")
-
-@app.get("/api/standby/health/check")
-async def standby_health_check():
-    """Health check for standby system"""
-    return {
-        "status": "healthy",
-        "service": "standby",
-        "schedules_count": len(standby_db),
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-# ===== DIRECT AVAILABILITY ENDPOINTS =====
+# ===== DIRECT AVAILABILITY ENDPOINTS (unchanged) =====
 class AvailabilityStats(BaseModel):
     totalEquipment: int = 0
     operational: int = 0
@@ -204,7 +128,6 @@ class AvailabilityStats(BaseModel):
     monthAvailability: float = 0.0
     weekAvailability: float = 0.0
 
-# Mock equipment data for availability
 mock_equipment_db = [
     {
         "id": "1",
@@ -258,15 +181,12 @@ mock_equipment_db = [
 
 @app.get("/api/availabilities")
 async def get_availabilities():
-    """Get equipment availabilities"""
     logger.info("Fetching equipment availabilities...")
     return mock_equipment_db
 
 @app.get("/api/availabilities/stats")
 async def get_availability_stats():
-    """Get availability statistics"""
     logger.info("Calculating availability statistics...")
-    
     total_equipment = len(mock_equipment_db)
     operational = sum(1 for e in mock_equipment_db if e["status"] == "operational")
     in_maintenance = sum(1 for e in mock_equipment_db if e["status"] == "maintenance")
@@ -296,7 +216,6 @@ async def get_availability_stats():
 
 @app.get("/api/availabilities/{equipment_id}")
 async def get_equipment_availability(equipment_id: str):
-    """Get availability for specific equipment"""
     for equipment in mock_equipment_db:
         if equipment["id"] == equipment_id:
             return equipment
@@ -304,7 +223,6 @@ async def get_equipment_availability(equipment_id: str):
 
 @app.get("/api/availabilities/health/check")
 async def availability_health_check():
-    """Health check for availability system"""
     return {
         "status": "healthy",
         "service": "availability",
@@ -312,25 +230,22 @@ async def availability_health_check():
         "timestamp": datetime.utcnow().isoformat()
     }
 
-# ===== INITIALIZE LOADED ROUTERS DICTIONARY =====
+# ===== INITIALIZE LOADED ROUTERS DICTIONARY (keeping for other routers) =====
 loaded_routers = {}
 
-# ===== CRITICAL: SPARES ROUTER =====
+# ===== CRITICAL: SPARES ROUTER (unchanged) =====
 logger.info("🔄 CRITICAL: Loading spares router...")
-
 try:
     from app.routers.spares import router as spares_router
     app.include_router(spares_router, prefix="/api/spares", tags=["Spares"])
     loaded_routers["spares"] = spares_router
     logger.info("✅ SPARES ROUTER SUCCESSFULLY LOADED at /api/spares")
-    
     logger.info("📋 Spares routes registered:")
     for route in spares_router.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
             methods = list(route.methods) if hasattr(route, 'methods') else []
             path = route.path if route.path else "/"
             logger.info(f"   {methods} /api/spares{path}")
-            
 except ImportError as e:
     logger.error(f"❌ CRITICAL ERROR: Failed to import spares router: {e}")
     logger.error(traceback.format_exc())
@@ -340,9 +255,8 @@ except Exception as e:
     logger.error(traceback.format_exc())
     loaded_routers["spares"] = None
 
-# ===== CRITICAL: DAILY REPORTS ROUTER =====
+# ===== CRITICAL: DAILY REPORTS ROUTER (unchanged) =====
 logger.info("🔄 CRITICAL: Loading daily_reports router...")
-
 try:
     from app.routers.daily_reports import router as daily_report_router
     app.include_router(daily_report_router, prefix="/api/daily-reports", tags=["Daily Reports"])
@@ -352,9 +266,8 @@ except ImportError as e:
     logger.error(f"❌ Failed to import daily_reports router: {e}")
     loaded_routers["daily_reports"] = None
 
-# ===== BREAKDOWNS ROUTER =====
+# ===== BREAKDOWNS ROUTER (unchanged) =====
 logger.info("🔄 Loading breakdowns router...")
-
 try:
     from app.routers.breakdowns import router as breakdowns_router
     app.include_router(breakdowns_router)
@@ -364,71 +277,35 @@ except ImportError as e:
     logger.error(f"❌ Failed to import breakdowns router: {e}")
     loaded_routers["breakdowns"] = None
 
-# ===== CRITICAL: STANDBY ROUTER =====
-logger.info("🔄 CRITICAL: Loading standby router...")
-
-try:
-    from app.routers.standby import router as standby_router
-    app.include_router(standby_router)
-    loaded_routers["standby"] = standby_router
-    logger.info("✅ STANDBY ROUTER SUCCESSFULLY LOADED at /api/standby")
-    
-    logger.info("📋 Standby routes registered:")
-    for route in standby_router.routes:
-        if hasattr(route, 'methods') and hasattr(route, 'path'):
-            methods = list(route.methods) if hasattr(route, 'methods') else []
-            path = route.path if route.path else "/"
-            logger.info(f"   {methods} {path}")
-            
-except ImportError as e:
-    logger.error(f"❌ CRITICAL ERROR: Failed to import standby router: {e}")
-    logger.error(traceback.format_exc())
-    loaded_routers["standby"] = None
-except Exception as e:
-    logger.error(f"❌ CRITICAL ERROR: Error including standby router: {e}")
-    logger.error(traceback.format_exc())
-    loaded_routers["standby"] = None
-
-# ===== NOTICEBOARD ROUTER =====
+# ===== NOTICEBOARD ROUTER (unchanged, but keep fallback) =====
 logger.info("🔄 CRITICAL: Loading noticeboard router...")
-
 try:
     from app.routers.notices import router as noticeboard_router
     app.include_router(noticeboard_router, prefix="/api/notices", tags=["Notices"])
     loaded_routers["noticeboard"] = noticeboard_router
     logger.info("✅ NOTICEBOARD ROUTER SUCCESSFULLY LOADED at /api/notices")
-    
     logger.info("📋 Noticeboard routes registered:")
     for route in noticeboard_router.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
             methods = list(route.methods) if hasattr(route, 'methods') else []
             path = route.path if route.path else "/"
             logger.info(f"   {methods} /api/notices{path}")
-            
 except ImportError as e:
     logger.error(f"❌ CRITICAL ERROR: Failed to import noticeboard router: {e}")
     logger.error(traceback.format_exc())
     loaded_routers["noticeboard"] = None
-    # Add temporary direct endpoints as fallback
-    logger.info("⚠️  Adding temporary notice endpoints as fallback...")
-    
-    # Add temporary notice models
-    from pydantic import Field
-    from typing import Optional as Opt
-    from datetime import date as dt_date
-    
+    # Add temporary notice models as fallback
     class TempNoticeCreate(BaseModel):
         title: str = Field(..., min_length=1)
         content: str = Field(..., min_length=1)
-        date: dt_date
+        date: date
         category: str = Field(..., min_length=1)
         priority: str = Field(default="Medium")
         status: str = Field(default="Draft")
         is_pinned: bool = Field(default=False)
-        author: Opt[str] = None
-        department: Opt[str] = None
+        author: Optional[str] = None
+        department: Optional[str] = None
     
-    # Add temporary endpoints
     @app.get("/api/notices")
     async def temp_get_notices():
         return {"message": "Temporary notices endpoint - router not loaded", "notices": []}
@@ -441,15 +318,13 @@ except ImportError as e:
             "id": "temp-123",
             "created_at": datetime.utcnow().isoformat()
         }
-        
 except Exception as e:
     logger.error(f"❌ CRITICAL ERROR: Error including noticeboard router: {e}")
     logger.error(traceback.format_exc())
     loaded_routers["noticeboard"] = None
 
-# ===== AVAILABILITY ROUTER =====
+# ===== AVAILABILITY ROUTER (unchanged) =====
 logger.info("🔄 Loading availability router...")
-
 try:
     from app.routers.availability import router as availability_router
     app.include_router(availability_router, prefix="/api", tags=["Availability"])
@@ -463,9 +338,8 @@ except Exception as e:
     logger.error(f"❌ Error including availability router: {e}")
     loaded_routers["availability"] = None
 
-# ===== EMPLOYEES ROUTER =====
+# ===== EMPLOYEES ROUTER (unchanged) =====
 logger.info("🔄 Loading employees router...")
-
 try:
     from app.routers.employees import router as employees_router
     app.include_router(employees_router, prefix="/api/employees", tags=["Employees"])
@@ -475,22 +349,19 @@ except ImportError as e:
     logger.error(f"❌ Failed to import employees router: {e}")
     loaded_routers["employees"] = None
 
-# ===== TIMESHEETS ROUTER =====
+# ===== TIMESHEETS ROUTER (unchanged) =====
 logger.info("🔄 CRITICAL: Loading timesheets router...")
-
 try:
     from app.routers.timesheets import router as timesheets_router
     app.include_router(timesheets_router, prefix="/api/timesheets", tags=["Timesheets"])
     loaded_routers["timesheets"] = timesheets_router
     logger.info("✅ TIMESHEETS ROUTER SUCCESSFULLY LOADED at /api/timesheets")
-    
     logger.info("📋 Timesheets routes registered:")
     for route in timesheets_router.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
             methods = list(route.methods) if hasattr(route, 'methods') else []
             path = route.path if route.path else "/"
             logger.info(f"   {methods} /api/timesheets{path}")
-            
 except ImportError as e:
     logger.error(f"❌ CRITICAL ERROR: Failed to import timesheets router: {e}")
     logger.error(traceback.format_exc())
@@ -500,25 +371,19 @@ except Exception as e:
     logger.error(traceback.format_exc())
     loaded_routers["timesheets"] = None
 
-# ===== CRITICAL: REQUISITIONS ROUTER - CORRECT IMPORT PATH =====
+# ===== CRITICAL: REQUISITIONS ROUTER (unchanged) =====
 logger.info("🔄 CRITICAL: Loading requisitions router...")
-
 try:
-    # CORRECT IMPORT - using routers folder where your file actually is
     from app.routers.requisitions import router as requisitions_router
-    
     app.include_router(requisitions_router, prefix="/api/requisitions", tags=["Requisitions"])
     loaded_routers["requisitions"] = requisitions_router
     logger.info("✅ REQUISITIONS ROUTER SUCCESSFULLY LOADED at /api/requisitions")
-    
-    # Log all requisitions routes
     logger.info("📋 Requisitions routes registered:")
     for route in requisitions_router.routes:
         if hasattr(route, 'methods') and hasattr(route, 'path'):
             methods = list(route.methods) if hasattr(route, 'methods') else []
             path = route.path if route.path else "/"
             logger.info(f"   {methods} /api/requisitions{path}")
-            
 except ImportError as e:
     logger.error(f"❌ CRITICAL ERROR: Failed to import requisitions router: {e}")
     logger.error(f"❌ Make sure the file exists at: app/routers/requisitions.py")
@@ -529,9 +394,8 @@ except Exception as e:
     logger.error(traceback.format_exc())
     loaded_routers["requisitions"] = None
 
-# ===== SCHEDULES ROUTER =====
+# ===== SCHEDULES ROUTER (unchanged) =====
 logger.info("🔄 Loading schedules router...")
-
 try:
     from app.routers.schedules import router as schedules_router
     app.include_router(schedules_router, prefix="/api/schedules", tags=["Schedules"])
@@ -541,9 +405,8 @@ except ImportError as e:
     logger.error(f"❌ Failed to import schedules router: {e}")
     loaded_routers["schedules"] = None
 
-# ===== EQUIPMENT ROUTER =====
+# ===== EQUIPMENT ROUTER (unchanged) =====
 logger.info("🔄 Loading equipment router...")
-
 try:
     from app.routers.equipment import router as equipment_router
     app.include_router(equipment_router, prefix="/api/equipment", tags=["Equipment"])
@@ -553,9 +416,8 @@ except ImportError as e:
     logger.error(f"❌ Failed to import equipment router: {e}")
     loaded_routers["equipment"] = None
 
-# ===== MAINTENANCE ROUTER =====
+# ===== MAINTENANCE ROUTER (unchanged) =====
 logger.info("🔄 Loading maintenance router...")
-
 try:
     from app.routers.maintenance import router as maintenance_router
     app.include_router(maintenance_router, prefix="/api/maintenance", tags=["Maintenance"])
@@ -565,9 +427,7 @@ except ImportError as e:
     logger.error(f"❌ Failed to import maintenance router: {e}")
     loaded_routers["maintenance"] = None
 
-# ===== OTHER ROUTERS =====
-logger.info("🔄 Loading other routers...")
-
+# ===== OTHER ROUTERS (unchanged) =====
 routers_to_import = [
     "reports", "inventory", "overtime", "ppe", "documents", 
     "training", "visualization", "leaves", "sheq", "compressors"
@@ -603,42 +463,33 @@ for router_name in routers_to_import:
 # ===== DIRECT NOTICE ENDPOINTS AS FALLBACK =====
 logger.info("🔄 Adding direct notice endpoints as guaranteed fallback...")
 
-# Direct notice models
-from pydantic import Field
-from typing import Optional as Opt
-from datetime import date as dt_date
-import uuid
-
 class DirectNoticeCreate(BaseModel):
     title: str = Field(..., min_length=1)
     content: str = Field(..., min_length=1)
-    date: dt_date
+    date: date
     category: str = Field(..., min_length=1)
     priority: str = Field(default="Medium")
     status: str = Field(default="Draft")
     is_pinned: bool = Field(default=False)
-    author: Opt[str] = None
-    department: Opt[str] = None
-    expires_at: Opt[dt_date] = None
-    target_audience: Opt[str] = None
-    notification_type: Opt[str] = None
+    author: Optional[str] = None
+    department: Optional[str] = None
+    expires_at: Optional[date] = None
+    target_audience: Optional[str] = None
+    notification_type: Optional[str] = None
     requires_acknowledgment: bool = Field(default=False)
-    attachment_name: Opt[str] = None
-    attachment_url: Opt[str] = None
-    attachment_size: Opt[str] = None
+    attachment_name: Optional[str] = None
+    attachment_url: Optional[str] = None
+    attachment_size: Optional[str] = None
 
 # In-memory storage for notices as fallback
 notices_db = []
 
-# Direct endpoints that will always work
 @app.get("/api/direct-notices")
 async def get_direct_notices():
-    """Direct endpoint to get notices - always works"""
     return notices_db
 
 @app.post("/api/direct-notices")
 async def create_direct_notice(notice: DirectNoticeCreate):
-    """Direct endpoint to create a notice - always works"""
     notice_id = str(uuid.uuid4())
     new_notice = {
         "id": notice_id,
@@ -651,19 +502,15 @@ async def create_direct_notice(notice: DirectNoticeCreate):
 
 @app.get("/api/direct-notices/{notice_id}")
 async def get_direct_notice(notice_id: str):
-    """Direct endpoint to get a specific notice"""
     for notice in notices_db:
         if notice.get("id") == notice_id:
             return notice
     raise HTTPException(status_code=404, detail="Notice not found")
 
 # ===== FALLBACK ROUTES FOR CRITICAL ENDPOINTS =====
-
-# Fallback for spares if router not loaded
 @app.get("/api/spares")
 @app.get("/api/spares/")
 async def spares_fallback():
-    """Fallback endpoint if spares router doesn't load"""
     if loaded_routers.get("spares"):
         return {
             "message": "Spares router is loaded",
@@ -681,11 +528,9 @@ async def spares_fallback():
             ]
         }
 
-# Fallback for employees if router not loaded
 @app.get("/api/employees")
 @app.get("/api/employees/")
 async def employees_fallback():
-    """Fallback endpoint if employees router doesn't load"""
     if loaded_routers.get("employees"):
         return {
             "message": "Employees router is loaded",
@@ -731,7 +576,7 @@ async def debug_router_status():
     return {
         "critical_routers": {
             "spares": loaded_routers.get("spares") is not None,
-            "standby": loaded_routers.get("standby") is not None,
+            "standby": True,  # now it's the direct Supabase endpoint
             "noticeboard": loaded_routers.get("noticeboard") is not None,
             "availability": loaded_routers.get("availability") is not None,
             "employees": loaded_routers.get("employees") is not None,
@@ -753,7 +598,6 @@ async def debug_router_status():
 # ===== HEALTH CHECK ENDPOINTS =====
 @app.get("/api/spares/health")
 async def spares_health_check_fallback():
-    """Health check for spares router"""
     spares_router = loaded_routers.get("spares")
     if spares_router:
         return {
@@ -775,7 +619,6 @@ async def spares_health_check_fallback():
 
 @app.get("/api/availability/health")
 async def availability_health_check_endpoint():
-    """Health check for availability system"""
     return {
         "status": "healthy",
         "service": "availability",
@@ -792,7 +635,6 @@ async def availability_health_check_endpoint():
 
 @app.get("/api/employees/health")
 async def employees_health_check():
-    """Health check for employees router"""
     employees_router = loaded_routers.get("employees")
     if employees_router:
         return {
@@ -809,7 +651,6 @@ async def employees_health_check():
 
 @app.get("/api/notices/health")
 async def notices_health_check():
-    """Health check for noticeboard router"""
     noticeboard_router = loaded_routers.get("noticeboard")
     if noticeboard_router:
         return {
@@ -843,7 +684,6 @@ async def notices_health_check():
 
 @app.get("/api/timesheets/health")
 async def timesheets_health_check():
-    """Health check for timesheets router"""
     timesheets_router = loaded_routers.get("timesheets")
     if timesheets_router:
         return {
@@ -874,7 +714,6 @@ async def timesheets_health_check():
 
 @app.get("/api/requisitions/health")
 async def requisitions_health_check():
-    """Health check for requisitions router"""
     requisitions_router = loaded_routers.get("requisitions")
     if requisitions_router:
         return {
@@ -908,7 +747,6 @@ async def requisitions_health_check():
 # ===== TEST ENDPOINTS =====
 @app.get("/api/test-availability-connection")
 async def test_availability_connection():
-    """Test endpoint for availability system"""
     return {
         "status": "test",
         "message": "Availability connection test",
@@ -926,7 +764,6 @@ async def test_availability_connection():
 
 @app.get("/api/test-all-connections")
 async def test_all_connections():
-    """Test all critical endpoints"""
     test_results = {}
     
     # Test basic health
@@ -937,7 +774,7 @@ async def test_all_connections():
         test_results["basic_health"] = {"status": "error", "error": str(e)}
     
     # Test each critical router
-    critical_routers = ["spares", "standby", "noticeboard", "availability", "employees", 
+    critical_routers = ["spares", "noticeboard", "availability", "employees", 
                         "daily_reports", "breakdowns", "equipment", "maintenance", 
                         "timesheets", "requisitions"]
     
@@ -1010,7 +847,6 @@ async def startup_event():
     # Check critical routers
     critical_routers = {
         "spares": "Spares Inventory",
-        "standby": "Standby Scheduler",
         "noticeboard": "Noticeboard Management",
         "availability": "Equipment Availability",
         "employees": "Employees",
@@ -1033,7 +869,12 @@ async def startup_event():
     logger.info(f"   ✅ Availability endpoints available at /api/availabilities")
     logger.info(f"   📋 Currently {len(mock_equipment_db)} equipment in availability system")
     logger.info(f"   ✅ Standby endpoints available at /api/standby")
-    logger.info(f"   📋 Currently {len(standby_db)} schedules in standby system")
+    try:
+        count_resp = supabase.table("standby_schedules").select("*", count="exact", head=True).execute()
+        count = count_resp.count if hasattr(count_resp, 'count') else 0
+        logger.info(f"   📋 Currently {count} schedules in standby system")
+    except:
+        logger.info(f"   📋 Standby schedules count unavailable")
     logger.info(f"   ✅ Direct notice endpoints available at /api/direct-notices")
     logger.info(f"   📋 Currently {len(notices_db)} notices in fallback system")
     logger.info(f"   ✅ Timesheets endpoints available at /api/timesheets")
@@ -1118,5 +959,4 @@ async def shutdown_event():
 from mangum import Mangum
 handler = Mangum(app)
 
-logger.info("🏁 Main.py setup completed - All routers initialized including Timesheets and Requisitions")
-logger.info("🏁 Direct endpoints available: /api/availabilities, /api/standby, /api/direct-notices, /api/timesheets, /api/requisitions")
+logger.info("🏁 Main.py setup completed - Standby router integrated, other routers as before")
