@@ -1,4 +1,4 @@
-﻿# main.py - COMPLETE VERSION WITH STANDBY ROUTER INTEGRATED (ALL OTHER ROUTERS PRESERVED)
+﻿# main.py - COMPLETE VERSION WITH STANDBY, SHEQ, NEAR MISS, AND WORK STOPPAGE ROUTERS INTEGRATED
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -60,6 +60,9 @@ async def root():
             "daily_reports": "/api/daily-reports",
             "breakdowns": "/api/breakdowns",
             "standby": "/api/standby",
+            "sheq": "/api/sheq",
+            "nearmiss": "/api/nearmiss",
+            "work_stoppage": "/api/work-stoppage",
             "employees": "/api/employees",
             "equipment": "/api/equipment",
             "maintenance": "/api/maintenance",
@@ -92,11 +95,7 @@ async def health_check():
 async def debug_test():
     return {"message": "Debug test - working", "status": "success"}
 
-# ===== STANDBY ROUTER (from corrected standby.py) =====
-# Adjust the import path if your project structure differs:
-# - If main.py is inside the 'backend' folder and standby.py is at app/routers/standby.py, use:
-#   from app.routers.standby import router as standby_router
-# - If main.py is inside the 'app' folder, use: from routers.standby import router as standby_router
+# ===== STANDBY ROUTER =====
 logger.info("🔄 Loading standby router...")
 try:
     from app.routers.standby import router as standby_router
@@ -104,7 +103,6 @@ try:
     logger.info("✅ STANDBY ROUTER SUCCESSFULLY LOADED at /api/standby")
 except ImportError as e:
     logger.error(f"❌ Failed to import standby router: {e}")
-    # Fallback: add a temporary endpoint to indicate the router isn't loaded
     @app.get("/api/standby")
     async def standby_fallback():
         return {"message": "Standby router not loaded", "status": "fallback"}
@@ -113,6 +111,65 @@ except ImportError as e:
         raise HTTPException(status_code=503, detail="Standby router not available")
 except Exception as e:
     logger.error(f"❌ Error including standby router: {e}")
+
+# ===== SHEQ INSPECTIONS ROUTER =====
+logger.info("🔄 Loading SHEQ inspections router...")
+try:
+    from app.routers.sheq_inspections import router as sheq_router
+    app.include_router(sheq_router)
+    logger.info("✅ SHEQ INSPECTIONS ROUTER SUCCESSFULLY LOADED at /api/sheq")
+except Exception as e:
+    logger.error(f"❌ Error including SHEQ router: {e}")
+    @app.get("/api/sheq")
+    async def sheq_fallback():
+        return {"message": "SHEQ router not loaded", "status": "fallback"}
+
+# ===== NEAR MISS REPORTS ROUTER =====
+logger.info("🔄 Loading near miss reports router...")
+try:
+    from app.routers.near_miss import router as nearmiss_router
+    app.include_router(nearmiss_router)
+    logger.info("✅ NEAR MISS REPORTS ROUTER SUCCESSFULLY LOADED at /api/nearmiss")
+    
+    # Log the routes for debugging
+    route_count = 0
+    for route in nearmiss_router.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = list(route.methods) if hasattr(route, 'methods') else []
+            path = route.path if route.path else "/"
+            logger.info(f"   ✅ Near Miss route: {methods} {path}")
+            route_count += 1
+    
+    logger.info(f"📊 Total Near Miss routes loaded: {route_count}")
+    
+except Exception as e:
+    logger.error(f"❌ Error including near miss router: {e}")
+    logger.error(f"Exception type: {type(e).__name__}")
+    logger.error(f"Exception details: {str(e)}")
+    logger.error(traceback.format_exc())
+    
+    # Add fallback endpoints
+    @app.get("/api/nearmiss")
+    async def nearmiss_fallback():
+        return {"message": "Near miss router not loaded", "error": str(e)}
+    @app.post("/api/nearmiss")
+    async def nearmiss_post_fallback():
+        raise HTTPException(status_code=503, detail="Near miss router not available")
+    @app.get("/api/nearmiss/{path:path}")
+    async def nearmiss_path_fallback(path: str):
+        raise HTTPException(status_code=503, detail=f"Near miss router not available: {path}")
+
+# ===== WORK STOPPAGE ROUTER =====
+logger.info("🔄 Loading work stoppage router...")
+try:
+    from app.routers.work_stoppage import router as work_stoppage_router
+    app.include_router(work_stoppage_router)
+    logger.info("✅ WORK STOPPAGE ROUTER LOADED at /api/work-stoppage")
+except Exception as e:
+    logger.error(f"❌ Error including work stoppage router: {e}")
+    @app.get("/api/work-stoppage")
+    async def work_stoppage_fallback():
+        return {"message": "Work stoppage router not loaded", "status": "fallback"}
 
 # ===== DIRECT AVAILABILITY ENDPOINTS (unchanged) =====
 class AvailabilityStats(BaseModel):
@@ -430,7 +487,7 @@ except ImportError as e:
 # ===== OTHER ROUTERS (unchanged) =====
 routers_to_import = [
     "reports", "inventory", "overtime", "ppe", "documents", 
-    "training", "visualization", "leaves", "sheq", "compressors"
+    "training", "visualization", "leaves", "compressors"
 ]
 
 for router_name in routers_to_import:
@@ -560,6 +617,9 @@ async def debug_all_routes():
         "total_routes": len(routes),
         "spares_routes": [r for r in routes if 'spares' in r['path']],
         "standby_routes": [r for r in routes if 'standby' in r['path']],
+        "sheq_routes": [r for r in routes if 'sheq' in r['path']],
+        "nearmiss_routes": [r for r in routes if 'nearmiss' in r['path']],
+        "work_stoppage_routes": [r for r in routes if 'work-stoppage' in r['path']],
         "notices_routes": [r for r in routes if 'notices' in r['path']],
         "direct_notices_routes": [r for r in routes if 'direct-notices' in r['path']],
         "employees_routes": [r for r in routes if 'employees' in r['path']],
@@ -576,7 +636,10 @@ async def debug_router_status():
     return {
         "critical_routers": {
             "spares": loaded_routers.get("spares") is not None,
-            "standby": True,  # now it's the direct Supabase endpoint
+            "standby": True,
+            "sheq": True,
+            "nearmiss": True,
+            "work_stoppage": True,
             "noticeboard": loaded_routers.get("noticeboard") is not None,
             "availability": loaded_routers.get("availability") is not None,
             "employees": loaded_routers.get("employees") is not None,
@@ -591,6 +654,9 @@ async def debug_router_status():
         "direct_endpoints_available": {
             "notices": True,
             "standby": True,
+            "sheq": True,
+            "nearmiss": True,
+            "work_stoppage": True,
             "availability": True
         }
     }
@@ -776,7 +842,7 @@ async def test_all_connections():
     # Test each critical router
     critical_routers = ["spares", "noticeboard", "availability", "employees", 
                         "daily_reports", "breakdowns", "equipment", "maintenance", 
-                        "timesheets", "requisitions"]
+                        "timesheets", "requisitions", "sheq", "nearmiss", "work_stoppage"]
     
     for router_name in critical_routers:
         router = loaded_routers.get(router_name)
@@ -819,6 +885,40 @@ async def test_all_connections():
         ]
     }
     
+    test_results["direct_sheq"] = {
+        "available": True,
+        "endpoints": [
+            "GET /api/sheq",
+            "POST /api/sheq",
+            "GET /api/sheq/{id}",
+            "GET /api/sheq/stats/overview"
+        ]
+    }
+    
+    test_results["direct_nearmiss"] = {
+        "available": True,
+        "endpoints": [
+            "GET /api/nearmiss",
+            "POST /api/nearmiss",
+            "GET /api/nearmiss/{id}",
+            "GET /api/nearmiss/stats/overview"
+        ]
+    }
+    
+    test_results["direct_work_stoppage"] = {
+        "available": True,
+        "endpoints": [
+            "GET /api/work-stoppage",
+            "POST /api/work-stoppage",
+            "GET /api/work-stoppage/{id}",
+            "PATCH /api/work-stoppage/{id}",
+            "DELETE /api/work-stoppage/{id}",
+            "GET /api/work-stoppage/stats/overview",
+            "GET /api/work-stoppage/suggestions/departments",
+            "GET /api/work-stoppage/suggestions/inspectors"
+        ]
+    }
+    
     test_results["direct_notices"] = {
         "available": True,
         "endpoints": [
@@ -855,7 +955,10 @@ async def startup_event():
         "equipment": "Equipment",
         "maintenance": "Maintenance",
         "timesheets": "Timesheets",
-        "requisitions": "Requisitions"
+        "requisitions": "Requisitions",
+        "sheq": "SHEQ Inspections",
+        "nearmiss": "Near Miss Reports",
+        "work_stoppage": "Work Stoppage Reports"
     }
     
     for router_name, display_name in critical_routers.items():
@@ -875,6 +978,9 @@ async def startup_event():
         logger.info(f"   📋 Currently {count} schedules in standby system")
     except:
         logger.info(f"   📋 Standby schedules count unavailable")
+    logger.info(f"   ✅ SHEQ endpoints available at /api/sheq")
+    logger.info(f"   ✅ Near Miss endpoints available at /api/nearmiss")
+    logger.info(f"   ✅ Work Stoppage endpoints available at /api/work-stoppage")
     logger.info(f"   ✅ Direct notice endpoints available at /api/direct-notices")
     logger.info(f"   📋 Currently {len(notices_db)} notices in fallback system")
     logger.info(f"   ✅ Timesheets endpoints available at /api/timesheets")
@@ -890,6 +996,9 @@ async def startup_event():
     route_categories = {
         "spares": [],
         "standby": [],
+        "sheq": [],
+        "nearmiss": [],
+        "work_stoppage": [],
         "notices": [],
         "direct_notices": [],
         "availability": [],
@@ -948,7 +1057,25 @@ async def startup_event():
         for route in route_categories["requisitions"][:5]:
             logger.info(f"   {route}")
     else:
-        logger.error("❌❌❌ NO REQUISITIONS ROUTES FOUND! ❌❌❌")
+        logger.error(f"❌❌❌ NO REQUISITIONS ROUTES FOUND! ❌❌❌")
+    
+    # Special notice for SHEQ routes
+    if route_categories["sheq"]:
+        logger.info("📊 SHEQ System is ready at:")
+        for route in route_categories["sheq"][:5]:
+            logger.info(f"   {route}")
+    
+    # Special notice for Near Miss routes
+    if route_categories["nearmiss"]:
+        logger.info("📊 Near Miss System is ready at:")
+        for route in route_categories["nearmiss"][:5]:
+            logger.info(f"   {route}")
+    
+    # Special notice for Work Stoppage routes
+    if route_categories["work_stoppage"]:
+        logger.info("📊 Work Stoppage System is ready at:")
+        for route in route_categories["work_stoppage"][:5]:
+            logger.info(f"   {route}")
 
 # ===== SHUTDOWN EVENT =====
 @app.on_event("shutdown")
@@ -959,4 +1086,4 @@ async def shutdown_event():
 from mangum import Mangum
 handler = Mangum(app)
 
-logger.info("🏁 Main.py setup completed - Standby router integrated, other routers as before")
+logger.info("🏁 Main.py setup completed - Standby, SHEQ, Near Miss, and Work Stoppage routers integrated, other routers as before")
