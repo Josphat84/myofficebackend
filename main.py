@@ -1,4 +1,4 @@
-﻿# main.py - COMPLETE VERSION WITH STANDBY, SHEQ, NEAR MISS, AND WORK STOPPAGE ROUTERS INTEGRATED
+﻿# main.py - COMPLETE VERSION WITH STANDBY, SHEQ, NEAR MISS, WORK STOPPAGE, PTO, VFL, AND PACHEDU ROUTERS INTEGRATED
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -63,6 +63,9 @@ async def root():
             "sheq": "/api/sheq",
             "nearmiss": "/api/nearmiss",
             "work_stoppage": "/api/work-stoppage",
+            "pto": "/api/pto",
+            "vfl": "/api/vfl",
+            "pachedu": "/api/pachedu",
             "employees": "/api/employees",
             "equipment": "/api/equipment",
             "maintenance": "/api/maintenance",
@@ -170,6 +173,111 @@ except Exception as e:
     @app.get("/api/work-stoppage")
     async def work_stoppage_fallback():
         return {"message": "Work stoppage router not loaded", "status": "fallback"}
+
+# ===== PTO ROUTER =====
+logger.info("🔄 Loading PTO router...")
+try:
+    from app.routers.pto import router as pto_router
+    app.include_router(pto_router)
+    logger.info("✅ PTO ROUTER LOADED at /api/pto")
+    
+    # Log the routes for debugging
+    route_count = 0
+    for route in pto_router.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = list(route.methods) if hasattr(route, 'methods') else []
+            path = route.path if route.path else "/"
+            logger.info(f"   ✅ PTO route: {methods} {path}")
+            route_count += 1
+    
+    logger.info(f"📊 Total PTO routes loaded: {route_count}")
+    
+except Exception as e:
+    logger.error(f"❌ Error including PTO router: {e}")
+    logger.error(f"Exception type: {type(e).__name__}")
+    logger.error(f"Exception details: {str(e)}")
+    logger.error(traceback.format_exc())
+    
+    # Add fallback endpoints
+    @app.get("/api/pto")
+    async def pto_fallback():
+        return {"message": "PTO router not loaded", "error": str(e)}
+    @app.post("/api/pto")
+    async def pto_post_fallback():
+        raise HTTPException(status_code=503, detail="PTO router not available")
+    @app.get("/api/pto/{path:path}")
+    async def pto_path_fallback(path: str):
+        raise HTTPException(status_code=503, detail=f"PTO router not available: {path}")
+
+# ===== VFL ROUTER =====
+logger.info("🔄 Loading VFL router...")
+try:
+    from app.routers.vfl import router as vfl_router
+    app.include_router(vfl_router)
+    logger.info("✅ VFL ROUTER LOADED at /api/vfl")
+    
+    # Log the routes for debugging
+    route_count = 0
+    for route in vfl_router.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = list(route.methods) if hasattr(route, 'methods') else []
+            path = route.path if route.path else "/"
+            logger.info(f"   ✅ VFL route: {methods} {path}")
+            route_count += 1
+    
+    logger.info(f"📊 Total VFL routes loaded: {route_count}")
+    
+except Exception as e:
+    logger.error(f"❌ Error including VFL router: {e}")
+    logger.error(f"Exception type: {type(e).__name__}")
+    logger.error(f"Exception details: {str(e)}")
+    logger.error(traceback.format_exc())
+    
+    # Add fallback endpoints
+    @app.get("/api/vfl")
+    async def vfl_fallback():
+        return {"message": "VFL router not loaded", "error": str(e)}
+    @app.post("/api/vfl")
+    async def vfl_post_fallback():
+        raise HTTPException(status_code=503, detail="VFL router not available")
+    @app.get("/api/vfl/{path:path}")
+    async def vfl_path_fallback(path: str):
+        raise HTTPException(status_code=503, detail=f"VFL router not available: {path}")
+
+# ===== PACHEDU ROUTER =====
+logger.info("🔄 Loading Pachedu router...")
+try:
+    from app.routers.pachedu import router as pachedu_router
+    app.include_router(pachedu_router)
+    logger.info("✅ PACHEDU ROUTER LOADED at /api/pachedu")
+    
+    # Log the routes for debugging
+    route_count = 0
+    for route in pachedu_router.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = list(route.methods) if hasattr(route, 'methods') else []
+            path = route.path if route.path else "/"
+            logger.info(f"   ✅ Pachedu route: {methods} {path}")
+            route_count += 1
+    
+    logger.info(f"📊 Total Pachedu routes loaded: {route_count}")
+    
+except Exception as e:
+    logger.error(f"❌ Error including Pachedu router: {e}")
+    logger.error(f"Exception type: {type(e).__name__}")
+    logger.error(f"Exception details: {str(e)}")
+    logger.error(traceback.format_exc())
+    
+    # Add fallback endpoints
+    @app.get("/api/pachedu")
+    async def pachedu_fallback():
+        return {"message": "Pachedu router not loaded", "error": str(e)}
+    @app.post("/api/pachedu")
+    async def pachedu_post_fallback():
+        raise HTTPException(status_code=503, detail="Pachedu router not available")
+    @app.get("/api/pachedu/{path:path}")
+    async def pachedu_path_fallback(path: str):
+        raise HTTPException(status_code=503, detail=f"Pachedu router not available: {path}")
 
 # ===== DIRECT AVAILABILITY ENDPOINTS (unchanged) =====
 class AvailabilityStats(BaseModel):
@@ -620,6 +728,9 @@ async def debug_all_routes():
         "sheq_routes": [r for r in routes if 'sheq' in r['path']],
         "nearmiss_routes": [r for r in routes if 'nearmiss' in r['path']],
         "work_stoppage_routes": [r for r in routes if 'work-stoppage' in r['path']],
+        "pto_routes": [r for r in routes if 'pto' in r['path']],
+        "vfl_routes": [r for r in routes if 'vfl' in r['path']],
+        "pachedu_routes": [r for r in routes if 'pachedu' in r['path']],
         "notices_routes": [r for r in routes if 'notices' in r['path']],
         "direct_notices_routes": [r for r in routes if 'direct-notices' in r['path']],
         "employees_routes": [r for r in routes if 'employees' in r['path']],
@@ -640,6 +751,9 @@ async def debug_router_status():
             "sheq": True,
             "nearmiss": True,
             "work_stoppage": True,
+            "pto": True,
+            "vfl": True,
+            "pachedu": True,
             "noticeboard": loaded_routers.get("noticeboard") is not None,
             "availability": loaded_routers.get("availability") is not None,
             "employees": loaded_routers.get("employees") is not None,
@@ -657,6 +771,9 @@ async def debug_router_status():
             "sheq": True,
             "nearmiss": True,
             "work_stoppage": True,
+            "pto": True,
+            "vfl": True,
+            "pachedu": True,
             "availability": True
         }
     }
@@ -842,7 +959,8 @@ async def test_all_connections():
     # Test each critical router
     critical_routers = ["spares", "noticeboard", "availability", "employees", 
                         "daily_reports", "breakdowns", "equipment", "maintenance", 
-                        "timesheets", "requisitions", "sheq", "nearmiss", "work_stoppage"]
+                        "timesheets", "requisitions", "sheq", "nearmiss", 
+                        "work_stoppage", "pto", "vfl", "pachedu"]
     
     for router_name in critical_routers:
         router = loaded_routers.get(router_name)
@@ -919,6 +1037,45 @@ async def test_all_connections():
         ]
     }
     
+    test_results["direct_pto"] = {
+        "available": True,
+        "endpoints": [
+            "GET /api/pto",
+            "POST /api/pto",
+            "GET /api/pto/{id}",
+            "PATCH /api/pto/{id}",
+            "DELETE /api/pto/{id}",
+            "GET /api/pto/stats/overview",
+            "GET /api/pto/suggestions/observers"
+        ]
+    }
+    
+    test_results["direct_vfl"] = {
+        "available": True,
+        "endpoints": [
+            "GET /api/vfl",
+            "POST /api/vfl",
+            "GET /api/vfl/{id}",
+            "PATCH /api/vfl/{id}",
+            "DELETE /api/vfl/{id}",
+            "GET /api/vfl/stats/overview",
+            "GET /api/vfl/suggestions/observers"
+        ]
+    }
+    
+    test_results["direct_pachedu"] = {
+        "available": True,
+        "endpoints": [
+            "GET /api/pachedu",
+            "POST /api/pachedu",
+            "GET /api/pachedu/{id}",
+            "PATCH /api/pachedu/{id}",
+            "DELETE /api/pachedu/{id}",
+            "GET /api/pachedu/stats/overview",
+            "GET /api/pachedu/suggestions/departments"
+        ]
+    }
+    
     test_results["direct_notices"] = {
         "available": True,
         "endpoints": [
@@ -958,7 +1115,10 @@ async def startup_event():
         "requisitions": "Requisitions",
         "sheq": "SHEQ Inspections",
         "nearmiss": "Near Miss Reports",
-        "work_stoppage": "Work Stoppage Reports"
+        "work_stoppage": "Work Stoppage Reports",
+        "pto": "Planned Task Observation",
+        "vfl": "Visible Felt Leadership",
+        "pachedu": "Pachedu Care Observations"
     }
     
     for router_name, display_name in critical_routers.items():
@@ -981,6 +1141,9 @@ async def startup_event():
     logger.info(f"   ✅ SHEQ endpoints available at /api/sheq")
     logger.info(f"   ✅ Near Miss endpoints available at /api/nearmiss")
     logger.info(f"   ✅ Work Stoppage endpoints available at /api/work-stoppage")
+    logger.info(f"   ✅ PTO endpoints available at /api/pto")
+    logger.info(f"   ✅ VFL endpoints available at /api/vfl")
+    logger.info(f"   ✅ Pachedu endpoints available at /api/pachedu")
     logger.info(f"   ✅ Direct notice endpoints available at /api/direct-notices")
     logger.info(f"   📋 Currently {len(notices_db)} notices in fallback system")
     logger.info(f"   ✅ Timesheets endpoints available at /api/timesheets")
@@ -999,6 +1162,9 @@ async def startup_event():
         "sheq": [],
         "nearmiss": [],
         "work_stoppage": [],
+        "pto": [],
+        "vfl": [],
+        "pachedu": [],
         "notices": [],
         "direct_notices": [],
         "availability": [],
@@ -1076,6 +1242,24 @@ async def startup_event():
         logger.info("📊 Work Stoppage System is ready at:")
         for route in route_categories["work_stoppage"][:5]:
             logger.info(f"   {route}")
+    
+    # Special notice for PTO routes
+    if route_categories["pto"]:
+        logger.info("📊 PTO System is ready at:")
+        for route in route_categories["pto"][:5]:
+            logger.info(f"   {route}")
+    
+    # Special notice for VFL routes
+    if route_categories["vfl"]:
+        logger.info("📊 VFL System is ready at:")
+        for route in route_categories["vfl"][:5]:
+            logger.info(f"   {route}")
+    
+    # Special notice for Pachedu routes
+    if route_categories["pachedu"]:
+        logger.info("📊 Pachedu System is ready at:")
+        for route in route_categories["pachedu"][:5]:
+            logger.info(f"   {route}")
 
 # ===== SHUTDOWN EVENT =====
 @app.on_event("shutdown")
@@ -1086,4 +1270,4 @@ async def shutdown_event():
 from mangum import Mangum
 handler = Mangum(app)
 
-logger.info("🏁 Main.py setup completed - Standby, SHEQ, Near Miss, and Work Stoppage routers integrated, other routers as before")
+logger.info("🏁 Main.py setup completed - Standby, SHEQ, Near Miss, Work Stoppage, PTO, VFL, and Pachedu routers integrated, other routers as before")
