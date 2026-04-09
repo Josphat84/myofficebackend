@@ -1,14 +1,15 @@
 # backend/app/routers/employees.py
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional
 from datetime import date
 from app.supabase_client import supabase
+import re
 
 router = APIRouter()
 
 class Employee(BaseModel):
-    id: int = Field(..., description="Unique employee ID")
+    employee_id: str = Field(..., min_length=1, max_length=50, description="Unique employee ID (string)")
     first_name: str = Field(..., min_length=1, description="First name of the employee")
     last_name: str = Field(..., min_length=1, description="Last name of the employee")
     id_number: str = Field(..., min_length=1, description="National ID or passport number")
@@ -34,7 +35,7 @@ class Employee(BaseModel):
         json_encoders = {date: lambda v: v.isoformat()}
         schema_extra = {
             "example": {
-                "id": 1001,
+                "employee_id": "EMP1001",
                 "first_name": "John",
                 "last_name": "Doe",
                 "id_number": "12-345678-A-12",
@@ -58,9 +59,15 @@ class Employee(BaseModel):
             }
         }
 
+    @validator('employee_id')
+    def validate_employee_id(cls, v):
+        """Validate employee ID format"""
+        if not v or not v.strip():
+            raise ValueError('Employee ID cannot be empty')
+        return v.strip().upper()
+
     @validator('qualifications', 'offences', 'awards_recognition', 'other_positions', pre=True, always=True)
     def ensure_list(cls, v):
-        """Ensure array fields are always lists, never None"""
         if v is None:
             return []
         return v
@@ -86,16 +93,14 @@ def process_dates_from_db(data: dict) -> dict:
         try:
             if isinstance(processed_data['date_of_engagement'], str):
                 processed_data['date_of_engagement'] = date.fromisoformat(processed_data['date_of_engagement'])
-        except (ValueError, TypeError) as e:
-            print(f"Error parsing date_of_engagement: {e}")
+        except (ValueError, TypeError):
             processed_data['date_of_engagement'] = None
     
     if processed_data.get('ppe_issue_date'):
         try:
             if isinstance(processed_data['ppe_issue_date'], str):
                 processed_data['ppe_issue_date'] = date.fromisoformat(processed_data['ppe_issue_date'])
-        except (ValueError, TypeError) as e:
-            print(f"Error parsing ppe_issue_date: {e}")
+        except (ValueError, TypeError):
             processed_data['ppe_issue_date'] = None
     
     array_fields = ['qualifications', 'offences', 'awards_recognition', 'other_positions']
@@ -133,10 +138,10 @@ async def get_employees():
 
 # GET single employee
 @router.get("/{employee_id}")
-async def get_employee(employee_id: int):
+async def get_employee(employee_id: str):
     """Retrieve a specific employee by ID."""
     try:
-        response = supabase.table("employees").select("*").eq("id", employee_id).execute()
+        response = supabase.table("employees").select("*").eq("employee_id", employee_id).execute()
         data = get_supabase_data(response)
             
         if not data:
@@ -156,13 +161,14 @@ async def get_employee(employee_id: int):
 async def create_employee(employee: Employee):
     """Create a new employee record."""
     try:
-        existing_response = supabase.table("employees").select("id").eq("id", employee.id).execute()
+        # Check if employee_id already exists
+        existing_response = supabase.table("employees").select("employee_id").eq("employee_id", employee.employee_id).execute()
         existing_data = get_supabase_data(existing_response)
             
         if existing_data:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Employee with ID {employee.id} already exists. Please use a different ID."
+                detail=f"Employee with ID {employee.employee_id} already exists. Please use a different ID."
             )
         
         data_to_insert = employee.dict()
@@ -185,10 +191,11 @@ async def create_employee(employee: Employee):
 
 # PUT update employee
 @router.put("/{employee_id}")
-async def update_employee(employee_id: int, updated: Employee):
+async def update_employee(employee_id: str, updated: Employee):
     """Update an existing employee record."""
     try:
-        existing_response = supabase.table("employees").select("id").eq("id", employee_id).execute()
+        # Check if employee exists
+        existing_response = supabase.table("employees").select("employee_id").eq("employee_id", employee_id).execute()
         existing_data = get_supabase_data(existing_response)
             
         if not existing_data:
@@ -197,16 +204,16 @@ async def update_employee(employee_id: int, updated: Employee):
                 detail=f"Employee with ID {employee_id} not found"
             )
         
-        if updated.id != employee_id:
+        if updated.employee_id != employee_id:
             raise HTTPException(
                 status_code=400,
-                detail=f"Employee ID in payload ({updated.id}) does not match URL parameter ({employee_id})"
+                detail=f"Employee ID in payload ({updated.employee_id}) does not match URL parameter ({employee_id})"
             )
         
         data_to_update = updated.dict()
         data_to_update = process_dates_for_db(data_to_update)
         
-        result = supabase.table("employees").update(data_to_update).eq("id", employee_id).execute()
+        result = supabase.table("employees").update(data_to_update).eq("employee_id", employee_id).execute()
         updated_data = get_supabase_data(result)
             
         if not updated_data:
@@ -223,10 +230,10 @@ async def update_employee(employee_id: int, updated: Employee):
 
 # DELETE employee
 @router.delete("/{employee_id}")
-async def delete_employee(employee_id: int):
+async def delete_employee(employee_id: str):
     """Delete an employee record."""
     try:
-        existing_response = supabase.table("employees").select("id, first_name, last_name").eq("id", employee_id).execute()
+        existing_response = supabase.table("employees").select("employee_id, first_name, last_name").eq("employee_id", employee_id).execute()
         existing_data = get_supabase_data(existing_response)
             
         if not existing_data:
@@ -237,7 +244,7 @@ async def delete_employee(employee_id: int):
         
         employee_name = f"{existing_data[0].get('first_name', '')} {existing_data[0].get('last_name', '')}".strip() or 'Unknown'
         
-        supabase.table("employees").delete().eq("id", employee_id).execute()
+        supabase.table("employees").delete().eq("employee_id", employee_id).execute()
             
         return {
             "success": True,
@@ -251,12 +258,53 @@ async def delete_employee(employee_id: int):
         print(f"Error deleting employee {employee_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error deleting employee: {str(e)}")
 
+# Search employees endpoint
+@router.get("/search/{query}")
+async def search_employees(
+    query: str,
+    search_by: str = Query("all", enum=["all", "name", "id", "id_number", "email"])
+):
+    """Search employees by various criteria"""
+    try:
+        if search_by == "name":
+            response = supabase.table("employees").select("*")\
+                .or_(f"first_name.ilike.%{query}%,last_name.ilike.%{query}%")\
+                .execute()
+        elif search_by == "id":
+            response = supabase.table("employees").select("*")\
+                .ilike("employee_id", f"%{query}%")\
+                .execute()
+        elif search_by == "id_number":
+            response = supabase.table("employees").select("*")\
+                .ilike("id_number", f"%{query}%")\
+                .execute()
+        elif search_by == "email":
+            response = supabase.table("employees").select("*")\
+                .ilike("email", f"%{query}%")\
+                .execute()
+        else:
+            response = supabase.table("employees").select("*")\
+                .or_(f"first_name.ilike.%{query}%,last_name.ilike.%{query}%,employee_id.ilike.%{query}%,id_number.ilike.%{query}%")\
+                .execute()
+        
+        data = get_supabase_data(response)
+        
+        if not data:
+            return []
+        
+        processed_employees = [process_dates_from_db(emp) for emp in data]
+        return processed_employees
+        
+    except Exception as e:
+        print(f"Error searching employees: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error searching employees: {str(e)}")
+
 # Health check
 @router.get("/health/status", tags=["Health"])
 async def employees_health():
     """Check if the employees service is operational"""
     try:
-        response = supabase.table("employees").select("id").limit(1).execute()
+        response = supabase.table("employees").select("employee_id").limit(1).execute()
         data = get_supabase_data(response)
         
         return {
