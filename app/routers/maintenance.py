@@ -82,6 +82,7 @@ class WorkOrderCreate(BaseModel):
     equipment: Optional[str] = None
     due_date: Optional[date] = None
     progress: int = 0
+    notes: Optional[str] = None
 
 class WorkOrderUpdate(BaseModel):
     to_department: Optional[str] = None
@@ -130,6 +131,7 @@ class WorkOrderUpdate(BaseModel):
     equipment: Optional[str] = None
     due_date: Optional[date] = None
     progress: Optional[int] = None
+    notes: Optional[str] = None
 
 # ==================== PPE MODELS (if not already separate) ====================
 class PPEIssueCreate(BaseModel):
@@ -181,14 +183,30 @@ def convert_dates_to_iso(record):
                 record[key] = value.isoformat()
     return record
 
+# Columns that are date/time types in Supabase — empty strings must become NULL
+_DATE_FIELDS = {'date_raised', 'artisan_date', 'foreman_date', 'due_date'}
+_TIME_FIELDS = {
+    'time_raised', 'time_work_started', 'time_work_finished',
+    'overtime_start_time', 'overtime_end_time',
+    'delay_from_time', 'delay_to_time',
+}
+
 def prepare_data_for_db(data: dict) -> dict:
-    """Convert dates and complex objects to JSON-serializable formats"""
+    """Prepare data for Supabase insert/update.
+
+    - date/datetime objects → ISO strings
+    - dicts/lists → kept as-is (Supabase handles JSONB natively; do NOT stringify)
+    - empty strings in date or time columns → None (NULL), so PostgreSQL doesn't reject them
+    """
     result = {}
     for key, value in data.items():
         if isinstance(value, (date, datetime)):
             result[key] = value.isoformat()
         elif isinstance(value, (dict, list)):
-            result[key] = json.dumps(value, cls=DateTimeEncoder)
+            # Pass Python objects directly — PostgREST serialises to JSONB automatically
+            result[key] = value
+        elif key in _DATE_FIELDS | _TIME_FIELDS and value == '':
+            result[key] = None
         else:
             result[key] = value
     return result

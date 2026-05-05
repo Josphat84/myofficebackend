@@ -29,10 +29,14 @@ class SpareCreate(BaseModel):
     min_quantity: int = Field(1, ge=0, description="Minimum stock level")
     max_quantity: int = Field(5, gt=0, description="Maximum stock level")
     unit_price: float = Field(0.0, ge=0, description="Unit price")
+    unit_of_measure: Optional[str] = Field("UN", description="Unit of measure (UN, KG, EA, etc)")
     priority: str = Field("medium", description="Priority level")
     storage_location: Optional[str] = Field(None, description="Storage location")
     supplier: Optional[str] = Field(None, description="Supplier name")
     safety_stock: bool = Field(False, description="Safety stock flag")
+    notes: Optional[str] = Field(None, description="Additional notes")
+    lead_time_days: Optional[int] = Field(0, ge=0, description="Lead time in days")
+    last_ordered_date: Optional[str] = Field(None, description="Last ordered date (ISO string)")
 
     class Config:
         json_encoders = {
@@ -49,16 +53,24 @@ class SpareUpdate(BaseModel):
     min_quantity: Optional[int] = Field(None, ge=0)
     max_quantity: Optional[int] = Field(None, gt=0)
     unit_price: Optional[float] = Field(None, ge=0)
+    unit_of_measure: Optional[str] = None
     priority: Optional[str] = None
     storage_location: Optional[str] = None
     supplier: Optional[str] = None
     safety_stock: Optional[bool] = None
+    notes: Optional[str] = None
+    lead_time_days: Optional[int] = Field(None, ge=0)
+    last_ordered_date: Optional[str] = None
 
     class Config:
         json_encoders = {
             date: lambda v: v.isoformat(),
             datetime: lambda v: v.isoformat()
         }
+
+class BulkSpareCreate(BaseModel):
+    items: List[SpareCreate]
+    skip_existing: bool = Field(True, description="Skip items with existing stock codes")
 
 # Helper function to convert dates in records
 def convert_dates_to_iso(record):
@@ -89,7 +101,7 @@ async def get_spares(
     search: Optional[str] = Query(None, description="Search in stock code or description"),
     category: Optional[str] = Query(None, description="Filter by category"),
     priority: Optional[str] = Query(None, description="Filter by priority"),
-    limit: int = Query(100, ge=1, le=1000, description="Limit results"),
+    limit: int = Query(5000, ge=1, le=10000, description="Limit results"),
     offset: int = Query(0, ge=0, description="Offset for pagination")
 ):
     """Get all spares with optional filtering"""
@@ -140,6 +152,44 @@ async def get_spare(spare_id: int):
     except Exception as e:
         logger.error(f"Error fetching spare: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching spare: {str(e)}")
+
+# POST bulk create spares
+@router.post("/bulk", status_code=201)
+async def bulk_create_spares(payload: BulkSpareCreate):
+    """Bulk create spare parts, skipping existing stock codes by default"""
+    try:
+        created = 0
+        skipped = 0
+        errors = 0
+
+        items = payload.items
+        batch_size = 50
+
+        for i in range(0, len(items), batch_size):
+            batch = items[i:i + batch_size]
+
+            for spare in batch:
+                try:
+                    if payload.skip_existing:
+                        existing = supabase.table("spares").select("id").eq("stock_code", spare.stock_code).execute()
+                        if existing.data:
+                            skipped += 1
+                            continue
+
+                    spare_data = spare.dict()
+                    supabase.table("spares").insert(spare_data).execute()
+                    created += 1
+                except Exception as item_err:
+                    logger.warning(f"Skipping {spare.stock_code}: {item_err}")
+                    errors += 1
+
+        logger.info(f"Bulk import complete: {created} created, {skipped} skipped, {errors} errors")
+        return {"created": created, "skipped": skipped, "errors": errors, "total": len(items)}
+
+    except Exception as e:
+        logger.error(f"Bulk create error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Bulk create failed: {str(e)}")
+
 
 # POST create spare
 @router.post("", status_code=201)
